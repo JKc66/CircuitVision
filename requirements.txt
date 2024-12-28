@@ -1,0 +1,11 @@
+streamlit
+numpy
+opencv-python-headless
+Pillow
+PySpice
+google-generativeai
+ultralytics
+torch
+torchvision
+python-dotenv
+scikit-learn

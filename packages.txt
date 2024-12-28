@@ -1,0 +1,8 @@
+ngspice
+build-essential
+python3-dev
+gcc
+libngspice0
+libngspice0-dev
+libgl1-mesa-glx
+libglib2.0-0
