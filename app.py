@@ -12,7 +12,7 @@ from pathlib import Path
 st.set_page_config(
     page_title="Circuit Analyzer",
     page_icon="⚡",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
