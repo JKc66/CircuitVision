@@ -193,7 +193,7 @@ def show_image_with_annotations(example, class_=None):
 def load_classes() -> dict:
     """Returns the List of Classes as Encoding Map"""
 
-    with open("sdp_demo/sdp_demo/classes.json") as classes_file:
+    with open("classes.json") as classes_file:
         return json.loads(classes_file.read())
 
 

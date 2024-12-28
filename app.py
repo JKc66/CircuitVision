@@ -12,16 +12,16 @@ import numpy as np
 import cv2
 import os
 import shutil
-from sdp_demo.sdp_demo.utilities import summarize_components, gemini_labels
-from sdp_demo.sdp_demo.circuit_analyzer import CircuitAnalyzer
+from utilities import summarize_components, gemini_labels
+from circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from pathlib import Path
 
 # Set up base paths
 BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / 'sdp_demo/static/assets/uploads'
-MODEL_PATH = BASE_DIR / 'sdp_demo/sdp_demo/best_large_model.pt'
+UPLOAD_DIR = BASE_DIR / 'static/uploads'
+MODEL_PATH = BASE_DIR / 'models/best_large_model.pt'
 
 # Create necessary directories
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
