@@ -1,4 +1,12 @@
 import streamlit as st
+import numpy as np
+import cv2
+import shutil
+from utilities import summarize_components, gemini_labels
+from circuit_analyzer import CircuitAnalyzer
+from copy import deepcopy
+from PySpice.Spice.Parser import SpiceParser
+from pathlib import Path
 
 # Set page config and custom styles
 st.set_page_config(
@@ -8,15 +16,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-import numpy as np
-import cv2
-import os
-import shutil
-from utilities import summarize_components, gemini_labels
-from circuit_analyzer import CircuitAnalyzer
-from copy import deepcopy
-from PySpice.Spice.Parser import SpiceParser
-from pathlib import Path
 
 # Set up base paths
 BASE_DIR = Path(__file__).parent
