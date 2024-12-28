@@ -1,0 +1,171 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="" />
+        <meta name="author" content="" />
+        <title>Circuit Analyzer</title>
+        <!-- Favicon-->
+        <link rel="icon" type="image/x-icon" href="{% static 'assets/favicon.ico' %}"/>
+        <!-- Bootstrap icons-->
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.5.0/font/bootstrap-icons.css" rel="stylesheet" type="text/css" />
+        <!-- Google fonts-->
+        <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700,300italic,400italic,700italic" rel="stylesheet" type="text/css" />
+        <!-- Core theme CSS (includes Bootstrap)-->
+        <link href={% static 'css/styles.css' %} rel="stylesheet" />
+    </head>
+    <body>
+        <!-- Navigation-->
+        <nav class="navbar navbar-light bg-light static-top">
+            <div class="container">
+                <a class="navbar-brand" href="#!">Circuit Analizer Demo</a>
+            </div>
+        </nav>
+        <!-- Masthead-->
+        <header class="masthead">
+            <div class="container position-relative">
+                <div class="row justify-content-center">
+                    <div class="col-xl-6">
+                        <div class="text-center text-white">
+                            <!-- Page heading-->
+                            <h1 class="mb-5">Welcome to The AI Circuit Analyzer Demo</h1>
+                            <div class="container mt-5">
+                                <h2 class="mb-4">Try it now!</h2>
+                                <form id="fileUploadForm">
+                                    <div class="mb-3">
+                                        <input class="form-control" type="file" id="autoUploadFile">
+                                    </div>
+                                </form>
+                                <div id="status" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <!-- Icons Grid-->
+        <section class="features-icons bg-light text-center">
+            <div class="container">
+                <div class="row">
+                    <div class="col-lg-4">
+                        <div class="features-icons-item mx-auto mb-5 mb-lg-0 mb-lg-3">
+                            <div class="features-icons-icon d-flex"><i class="bi-window m-auto text-primary"></i></div>
+                            <h3>Elegant Demo</h3>
+                            <p class="lead mb-0">This theme will look great on any device</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="features-icons-item mx-auto mb-5 mb-lg-0 mb-lg-3">
+                            <div class="features-icons-icon d-flex"><i class="bi-layers m-auto text-primary"></i></div>
+                            <h3>Process Overview</h3>
+                            <p class="lead mb-0">Shows every step of the process</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="features-icons-item mx-auto mb-0 mb-lg-3">
+                            <div class="features-icons-icon d-flex"><i class="bi-terminal m-auto text-primary"></i></div>
+                            <h3>Easy to Use</h3>
+                            <p class="lead mb-0">Ready to use with your own circuit</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- Image Showcases-->
+        <section class="showcase">
+            <div class="container-fluid p-0">
+                <div class="row g-0">
+                    <div id="detection_place" class="col-lg-6 order-lg-2 text-white showcase-img" style="background-size: contain; background-repeat: no-repeat;"></div>
+                    <div id="scrolto" class="col-lg-6 order-lg-1 text-center showcase-text">
+                        <h2>Component Detection</h2>
+                        <p id="detection_paragraph"class="lead mb-0">This is where the component bounding boxes will be shown</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div id="emptied_place" class="col-lg-6 order-lg-2 text-white showcase-img" style="background-size: contain; background-repeat: no-repeat;"></div>
+                    <div class="col-lg-6 order-lg-1 text-center showcase-text">
+                        <h2>Removing Components</h2>
+                        <p id="emptied_paragraph"class="lead mb-0">This is where the components of the circuit are removed, leaving wires only</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div id="nodes_place" class="col-lg-6 order-lg-2 text-white showcase-img" style="background-size: contain; background-repeat: no-repeat;"></div>
+                    <div class="col-lg-6 order-lg-1 text-center showcase-text">
+                        <h2>Node Detection</h2>
+                        <p id="nodes_paragraph"class="lead mb-0">This is where nodes are initially proposed and detected</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div id="final_place" class="col-lg-6 order-lg-2 text-white showcase-img" style="background-size: contain; background-repeat: no-repeat;"></div>
+                    <div class="col-lg-6 order-lg-1 text-center showcase-text">
+                        <h2>Node Filtering</h2>
+                        <p id="final_paragraph"class="lead mb-0">This is where nodes are filtered from mistaken nodes</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div class="text-center showcase-text">
+                        <h2>Netlist structure</h2>
+                        <p id="valueless_netlist"class="lead mb-0">This is where nodes are turned into a netlist with no values (only structure)</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div id="netlist_place" class="col-lg-6 order-lg-2 text-white showcase-img" style="background-size: contain; background-repeat: no-repeat;"></div>
+                    <div class="col-lg-6 order-lg-1 text-center showcase-text">
+                        <h2>Gemini Communication Result</h2>
+                        <p id="netlist" class="lead mb-0">This is where numbered components are analyzed by gemini</p>
+                    </div>
+                </div>
+                <div class="row g-0">
+                    <div class="text-center showcase-text">
+                        <h2>Circuit's Operating Point</h2>
+                        <p id="analysis"class="lead mb-0">This is where the ngspice and pyspice results are shown</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- Footer-->
+        <footer class="footer bg-light">
+            <div class="container">
+                <div class="row">
+                    <div class="col-lg-6 h-100 text-center text-lg-start my-auto">
+                        <ul class="list-inline mb-2">
+                            <li class="list-inline-item"><a href="#!">About</a></li>
+                            <li class="list-inline-item">⋅</li>
+                            <li class="list-inline-item"><a href="#!">Contact</a></li>
+                            <li class="list-inline-item">⋅</li>
+                            <li class="list-inline-item"><a href="#!">Terms of Use</a></li>
+                            <li class="list-inline-item">⋅</li>
+                            <li class="list-inline-item"><a href="#!">Privacy Policy</a></li>
+                        </ul>
+                        <p class="text-muted small mb-4 mb-lg-0">&copy; Your Website 2023. All Rights Reserved.</p>
+                    </div>
+                    <div class="col-lg-6 h-100 text-center text-lg-end my-auto">
+                        <ul class="list-inline mb-0">
+                            <li class="list-inline-item me-4">
+                                <a href="#!"><i class="bi-facebook fs-3"></i></a>
+                            </li>
+                            <li class="list-inline-item me-4">
+                                <a href="#!"><i class="bi-twitter fs-3"></i></a>
+                            </li>
+                            <li class="list-inline-item">
+                                <a href="#!"><i class="bi-instagram fs-3"></i></a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </footer>
+        <!-- Bootstrap core JS-->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+        <!-- Core theme JS-->
+        <script src={% static 'js/scripts.js' %}></script>
+        <!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *-->
+        <!-- * *                               SB Forms JS                               * *-->
+        <!-- * * Activate your form at https://startbootstrap.com/solution/contact-forms * *-->
+        <!-- * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *-->
+        <script src="https://cdn.startbootstrap.com/sb-forms-latest.js"></script>
+    </body>
+</html>
