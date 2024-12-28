@@ -5,7 +5,7 @@ st.set_page_config(
     page_title="Circuit Analyzer",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 import numpy as np
