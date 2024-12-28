@@ -15,6 +15,7 @@ from PySpice.Spice.Library import SpiceLibrary
 from PySpice.Spice.Netlist import Circuit
 from PySpice.Spice.Parser import SpiceParser
 from PySpice.Spice.Simulation import CircuitSimulation
+from pathlib import Path
 
 analyzer = CircuitAnalyzer(yolo_path='sdp_demo/best_large_model.pt', debug=False)
 files_location = 'sdp_demo/static/assets/uploads/'
@@ -50,28 +51,31 @@ def upload_file(request):
 
             
             #save the image locally 
-            shutil.rmtree(files_location)
-            os.mkdir(files_location)
-            image_path = files_location + '1.' + filename.split('.')[-1]
-            cv2.imwrite(image_path, image)
+            files_path = Path(files_location)
+            if files_path.exists():
+                shutil.rmtree(files_path)
+            files_path.mkdir(parents=True, exist_ok=True)
+            
+            image_path = files_path / f'1.{filename.split(".")[-1]}'
+            cv2.imwrite(str(image_path), image)
 
             #detection bboxes section
             bboxes = analyzer.bboxes(image)
             detection_summary = summarize_components(bboxes)
             print(detection_summary)
             annotated_image = analyzer.get_annotated(image, bboxes)
-            annotated_path = files_location + '2.' + filename.split('.')[-1]
-            cv2.imwrite(annotated_path, annotated_image)
+            annotated_path = files_path / f'2.{filename.split(".")[-1]}'
+            cv2.imwrite(str(annotated_path), annotated_image)
 
             #node section
             nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization = analyzer.get_node_connections(image, bboxes)
-            emptied_path = files_location + '3.' + filename.split('.')[-1]
-            cv2.imwrite(emptied_path, emptied_mask)
-            contour_path = files_location + '4.' + filename.split('.')[-1]
+            emptied_path = files_path / f'3.{filename.split(".")[-1]}'
+            cv2.imwrite(str(emptied_path), emptied_mask)
+            contour_path = files_path / f'4.{filename.split(".")[-1]}'
             contour_text = f"{len(nodes)} nodes detected, excluding any noise initially marked as a node"
-            cv2.imwrite(contour_path, contour_image)
-            final_path = files_location + '5.' + filename.split('.')[-1]
-            cv2.imwrite(final_path, final_visualization)
+            cv2.imwrite(str(contour_path), contour_image)
+            final_path = files_path / f'5.{filename.split(".")[-1]}'
+            cv2.imwrite(str(final_path), final_visualization)
 
             #value-less netlist
             valueless_netlist = analyzer.generate_netlist_from_nodes(nodes)
@@ -80,9 +84,9 @@ def upload_file(request):
 
             #fixed netlist
             enum_img, bbox_ids= analyzer.enumerate_components(image, bboxes)
-            enum_path = files_location + '6.' + filename.split('.')[-1]
+            enum_path = files_path / f'6.{filename.split(".")[-1]}'
             print(enum_img.shape)
-            cv2.imwrite(enum_path, enum_img)
+            cv2.imwrite(str(enum_path), enum_img)
             gemini_info = gemini_labels(enum_img)
             print(gemini_info)
             analyzer.fix_netlist(netlist, gemini_info)

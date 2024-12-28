@@ -133,10 +133,10 @@ if uploaded_file is not None:
             st.markdown(f"- **Name**: {uploaded_file.name}")
         
         # Clear and save files
-        if os.path.exists(UPLOAD_DIR):
+        if UPLOAD_DIR.exists():
             shutil.rmtree(UPLOAD_DIR)
-        UPLOAD_DIR.mkdir(exist_ok=True)
-        image_path = UPLOAD_DIR / '1.jpg'
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        image_path = UPLOAD_DIR / f'1.{uploaded_file.name.split(".")[-1]}'
         cv2.imwrite(str(image_path), image)
 
         # Component Detection Section
