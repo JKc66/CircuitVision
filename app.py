@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import cv2
 import shutil
-from src.utills import summarize_components, gemini_labels
+from src.utills import summarize_components, gemini_labels, non_max_suppression_by_confidence
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
@@ -15,7 +15,6 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
-
 
 # Set up base paths
 BASE_DIR = Path(__file__).parent
@@ -38,74 +37,18 @@ def load_circuit_analyzer():
 # Initialize the circuit analyzer
 analyzer = load_circuit_analyzer()
 
-# Custom CSS with dark theme support
-st.markdown("""
-    <style>
-        .main {
-            padding: 2rem;
-            background-color: var(--background-color);
-        }
-        .stButton>button {
-            width: 100%;
-            margin-top: 1rem;
-            border-radius: 0.5rem;
-            background: linear-gradient(90deg, #1f77b4 0%, #2998ff 100%);
-            border: none;
-            color: white;
-            transition: all 0.3s ease;
-        }
-        .stButton>button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(31, 119, 180, 0.3);
-        }
-        .section-container {
-            padding: 2rem;
-            margin: 2rem 0;
-            border-radius: 1rem;
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        h1 {
-            background: linear-gradient(90deg, #1f77b4 0%, #2998ff 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-weight: 700;
-            margin-bottom: 2rem;
-        }
-        h2, h3, h4 {
-            color: var(--text-color);
-            margin: 1.5rem 0;
-            font-weight: 600;
-        }
-        .stProgress > div > div {
-            background: linear-gradient(90deg, #1f77b4 0%, #2998ff 100%);
-        }
-        img {
-            border-radius: 0.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# Sidebar
-with st.sidebar:
-    st.title("⚡ Circuit Analyzer")
-    st.markdown("---")
-    st.markdown("""
-    ### Step-by-Step Guide
-    1. 📤 Upload your circuit diagram
-    2. 🔍 Review detected components
-    3. 🔗 Check node connections
-    4. 📝 Verify the netlist
-    5. ⚡ View SPICE analysis
-    """)
-    st.markdown("---")
-    st.info("💡 Supported formats: PNG, JPG, JPEG")
+# Create containers for results
+if 'results' not in st.session_state:
+    st.session_state.results = {
+        'bboxes': None,
+        'nodes': None,
+        'netlist': None,
+        'netlist_text': None
+    }
 
 # Main content
 st.title("Circuit Diagram Analysis Tool")
-st.markdown("Upload your circuit diagram to get detailed component analysis and SPICE simulation results.")
+st.markdown("Upload your circuit diagram and analyze it step by step.")
 
 # File upload section
 uploaded_file = st.file_uploader(
@@ -115,160 +58,177 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    with st.spinner("Processing image..."):
-        # Convert and display original image
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
-        # Image Analysis Section
-        st.markdown("## 📸 Image Analysis")
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.image(image, caption="Original Image", use_container_width=True)
-        with col2:
-            st.markdown("### Image Details")
-            st.markdown(f"- **Size**: {image.shape[1]}x{image.shape[0]} pixels")
-            st.markdown(f"- **Format**: {uploaded_file.type}")
-            st.markdown(f"- **Name**: {uploaded_file.name}")
-        
-        # Clear and save files
-        if UPLOAD_DIR.exists():
-            shutil.rmtree(UPLOAD_DIR)
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        image_path = UPLOAD_DIR / f'1.{uploaded_file.name.split(".")[-1]}'
-        cv2.imwrite(str(image_path), image)
+    # Convert image
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB for display
+    
+    # Clear and save files
+    if UPLOAD_DIR.exists():
+        shutil.rmtree(UPLOAD_DIR)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    image_path = UPLOAD_DIR / f'1.{uploaded_file.name.split(".")[-1]}'
+    save_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # Convert back to BGR for saving
+    cv2.imwrite(str(image_path), save_image)
 
-        # Component Detection Section
-        st.markdown("## 🔍 Component Detection")
-        progress_bar = st.progress(0)
-        
-        # Detection process
-        bboxes = analyzer.bboxes(image)
-        progress_bar.progress(33)
-        detection_summary = summarize_components(bboxes)
-        
-        # Display annotated image
-        annotated_image = analyzer.get_annotated(image, bboxes)
-        st.image(annotated_image, use_container_width=True)
-        
-        # Parse and display component counts horizontally
-        component_counts = {}
-        for line in detection_summary.split('\n'):
-            if line.startswith('Detected:'):
-                components = line.replace('Detected:', '').strip().split(',')
-                for comp in components:
-                    if comp.strip():
-                        count, *name_parts = comp.strip().split(' ')
-                        component_name = ' '.join(name_parts)
-                        component_counts[component_name] = int(count)
-        
-        # Create columns for each component metric
-        cols = st.columns(len(component_counts))
-        for col, (component, count) in zip(cols, component_counts.items()):
-            with col:
-                st.metric(
-                    label=component,
-                    value=count,
-                    delta=None,
-                )
-        
-        progress_bar.progress(66)
-        
-        # Node Analysis Section
-        st.markdown("## 🔗 Node Analysis")
-        nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization = analyzer.get_node_connections(image, bboxes)
-        
-        st.image(final_visualization, caption="Node Connections", use_container_width=True)
-        
-        # Debug visualization
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(emptied_mask, caption="Node Mask")
-        with col2:
-            st.image(contour_image, caption=f"Detected Nodes: {len(nodes)}")
-        
-        progress_bar.progress(100)
-
-        # Netlist Generation Section
-        st.markdown("## 📝 Netlist Generation")
-        
-        # Initial Netlist
-        st.markdown("### Initial Netlist")
-        valueless_netlist = analyzer.generate_netlist_from_nodes(nodes)
-        valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
-        st.code(valueless_netlist_text, language="python")
-        
-        # Final Netlist
-        st.markdown("### Final Netlist with Component Values")
-        netlist = deepcopy(valueless_netlist)
-        enum_img, bbox_ids = analyzer.enumerate_components(image, bboxes)
-        
-        with st.spinner("Analyzing component values..."):
-            gemini_info = gemini_labels(enum_img)
-            analyzer.fix_netlist(netlist, gemini_info)
-            netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
-        st.code(netlist_text, language="python")
-
-        # SPICE Analysis Section
-        st.markdown("## ⚡ SPICE Analysis")
-        try:
-            net_text = '.title detected_circuit\n' + netlist_text
-            parser = SpiceParser(source=net_text)
-            bootstrap_circuit = parser.build_circuit()
-            simulator = bootstrap_circuit.simulator()
-            analysis = simulator.operating_point()
-            
-            col1, col2 = st.columns(2)
+    # Step 1: Image Analysis
+    st.markdown("## Step 1: 📸 Image Analysis")
+    analyze_container = st.container()
+    if st.button("Analyze Image"):
+        with analyze_container:
+            col1, col2 = st.columns([2, 1])
             with col1:
-                st.markdown("### Node Voltages")
-                st.json(analysis.nodes)
+                st.image(image, caption="Original Image", use_container_width=True)
             with col2:
-                st.markdown("### Branch Currents")
-                st.json(analysis.branches)
+                st.markdown("### Image Details")
+                st.markdown(f"- **Size**: {image.shape[1]}x{image.shape[0]} pixels")
+                st.markdown(f"- **Format**: {uploaded_file.type}")
+                st.markdown(f"- **Name**: {uploaded_file.name}")
+
+    # Step 2: Component Detection
+    st.markdown("## Step 2: 🔍 Component Detection")
+    detection_container = st.container()
+    if st.button("Detect Components"):
+        with st.spinner("Detecting components..."):
+            # Get raw bounding boxes
+            raw_bboxes = analyzer.bboxes(image)
             
-            # Download Section
-            st.markdown("## 📥 Download Results")
-            st.markdown("""
-            <style>
-                div[data-testid="column"] {
-                    display: flex;
-                    justify-content: center;
-                }
-                
-                div[data-testid="stDownloadButton"] {
-                    width: 100%;
-                    text-align: center;
-                }
-                
-                div[data-testid="stDownloadButton"] button {
-                    width: 100%;
-                    padding: 0.5rem;
-                }
-            </style>
-            """, unsafe_allow_html=True)
+            # Apply Non-Maximum Suppression
+            bboxes = non_max_suppression_by_confidence(raw_bboxes, iou_threshold=0.6)
+            st.session_state.results['bboxes'] = bboxes # Store filtered bboxes
             
-            download_cols = st.columns([1, 1, 1])
-            with download_cols[0]:
-                st.download_button(
-                    label="📄 Download Netlist",
-                    data=netlist_text,
-                    file_name="circuit_netlist.txt",
-                    mime="text/plain"
-                )
-            with download_cols[1]:
-                st.download_button(
-                    label="📊 Download Analysis",
-                    data=str(analysis.nodes) + "\n\n" + str(analysis.branches),
-                    file_name="spice_analysis.txt",
-                    mime="text/plain"
-                )
-            with download_cols[2]:
-                st.download_button(
-                    label="🖼️ Annotated Circuit",
-                    data=cv2.imencode('.png', annotated_image)[1].tobytes(),
-                    file_name="annotated_circuit.png",
-                    mime="image/png"
-                )
-        except Exception as e:
-            st.error(f"❌ SPICE Analysis Error: {str(e)}")
-            st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.") 
+            # Summarize based on filtered bboxes
+            detection_summary = summarize_components(bboxes)
+            
+            with detection_container:
+                # Display annotated image with confidence scores using filtered bboxes
+                annotated_image = image.copy()
+                for bbox in bboxes:
+                    xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
+                    xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+                    label = bbox['class']
+                    conf = bbox['confidence']
+                    
+                    # Draw rectangle
+                    cv2.rectangle(annotated_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                    
+                    # Add label with confidence score
+                    label_text = f"{label}: {conf:.2f}"
+                    # Calculate text size to position it better
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.5
+                    thickness = 1
+                    (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+                    
+                    # Draw white background for text for better visibility
+                    cv2.rectangle(annotated_image, 
+                                (xmin, ymin - text_height - 5),
+                                (xmin + text_width, ymin),
+                                (255, 255, 255),
+                                -1)  # Filled rectangle
+                    
+                    # Draw text
+                    cv2.putText(annotated_image, 
+                              label_text,
+                              (xmin, ymin - 5), 
+                              font,
+                              font_scale,
+                              (0, 0, 255),  # Red color
+                              thickness)
+                
+                st.image(annotated_image, caption="Component Detection with Confidence Scores", use_container_width=True)
+                
+                # Parse and display component counts with average confidence using filtered bboxes
+                component_stats = {}
+                for bbox in bboxes:
+                    name = bbox['class']
+                    conf = bbox['confidence']
+                    if name not in component_stats:
+                        component_stats[name] = {'count': 0, 'total_conf': 0}
+                    component_stats[name]['count'] += 1
+                    component_stats[name]['total_conf'] += conf
+                
+                cols = st.columns(len(component_stats))
+                for col, (component, stats) in zip(cols, component_stats.items()):
+                    with col:
+                        avg_conf = stats['total_conf'] / stats['count']
+                        st.metric(
+                            label=component,
+                            value=stats['count'],
+                            delta=f"Avg Conf: {avg_conf:.2f}"
+                        )
+
+    # Step 3: Node Analysis
+    st.markdown("## Step 3: 🔗 Node Analysis")
+    node_container = st.container()
+    if st.button("Analyze Nodes"):
+        with st.spinner("Analyzing nodes..."):
+            if st.session_state.results['bboxes'] is not None:
+                nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization = analyzer.get_node_connections(image, st.session_state.results['bboxes'])
+                st.session_state.results['nodes'] = nodes
+                
+                with node_container:
+                    st.image(final_visualization, caption="Node Connections", use_container_width=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.image(emptied_mask, caption="Node Mask")
+                    with col2:
+                        st.image(contour_image, caption=f"Detected Nodes: {len(nodes)}")
+            else:
+                st.warning("Please detect components first")
+
+    # Step 4: Netlist Generation
+    st.markdown("## Step 4: 📝 Netlist Generation")
+    netlist_container = st.container()
+    if st.button("Generate Netlist"):
+        with st.spinner("Generating netlist..."):
+            if st.session_state.results['nodes'] is not None:
+                with netlist_container:
+                    # Initial Netlist
+                    st.markdown("### Initial Netlist")
+                    valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.results['nodes'])
+                    valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
+                    st.code(valueless_netlist_text, language="python")
+                    
+                    # Final Netlist
+                    st.markdown("### Final Netlist with Component Values")
+                    netlist = deepcopy(valueless_netlist)
+                    enum_img, bbox_ids = analyzer.enumerate_components(image, st.session_state.results['bboxes'])
+                    
+                    gemini_info = gemini_labels(enum_img)
+                    analyzer.fix_netlist(netlist, gemini_info)
+                    netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
+                    st.code(netlist_text, language="python")
+                    
+                    st.session_state.results['netlist'] = netlist
+                    st.session_state.results['netlist_text'] = netlist_text
+            else:
+                st.warning("Please analyze nodes first")
+
+    # Step 5: SPICE Analysis
+    st.markdown("## Step 5: ⚡ SPICE Analysis")
+    spice_container = st.container()
+    if st.button("Run SPICE Analysis"):
+        if st.session_state.results['netlist_text'] is not None:
+            try:
+                with spice_container:
+                    net_text = '.title detected_circuit\n' + st.session_state.results['netlist_text']
+                    parser = SpiceParser(source=net_text)
+                    bootstrap_circuit = parser.build_circuit()
+                    simulator = bootstrap_circuit.simulator()
+                    analysis = simulator.operating_point()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("### Node Voltages")
+                        st.json(analysis.nodes)
+                    with col2:
+                        st.markdown("### Branch Currents")
+                        st.json(analysis.branches)
+                
+            except Exception as e:
+                st.error(f"❌ SPICE Analysis Error: {str(e)}")
+                st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
+        else:
+            st.warning("Please generate netlist first") 
