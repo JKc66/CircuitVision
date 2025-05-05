@@ -1,7 +1,10 @@
 
 static/uploads
 
+# models:
 *.pth
+*.pt
+
 *.pyc
 *.pyo
 *.pyd

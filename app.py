@@ -24,7 +24,7 @@ st.set_page_config(
 # Set up base paths
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'static/uploads'
-MODEL_PATH = BASE_DIR / 'models/best_large_model_yolo.pt'
+MODEL_PATH = BASE_DIR / 'models/models/YOLO/best_large_model_yolo.pt'
 
 # Create necessary directories
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
