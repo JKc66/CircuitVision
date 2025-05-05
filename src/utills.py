@@ -235,7 +235,7 @@ def gemini_labels(image_file):
     # Convert the image file to PIL Image format if it's a numpy array
     image_file = Image.fromarray(image_file) 
     
-    #MODEL = "gemini-2.5-flash-preview-04-17"
+    # MODEL = "gemini-2.5-flash-preview-04-17"
     MODEL = "gemini-2.5-pro-exp-03-25"
     
     prompt = ("Identify only the components and their values in this circuit schematic, the id of each component is in red. return the object as a python list of dictioaries."
@@ -659,6 +659,23 @@ def non_max_suppression_by_area(bboxes, iou_threshold=0.5):
         bbox1 = bboxes.pop(0)
         filtered_bboxes.append(bbox1)
 
+        bboxes = [bbox2 for bbox2 in bboxes
+                  if calculate_iou(bbox1, bbox2) < iou_threshold]
+
+    return filtered_bboxes
+
+def non_max_suppression_by_confidence(bboxes, iou_threshold=0.5):
+    """Applies NMS based on confidence for bounding boxes in dictionary format."""
+
+    # Sort by confidence score (descending)
+    bboxes = sorted(bboxes, key=lambda bbox: bbox['confidence'], reverse=True)
+
+    filtered_bboxes = []
+    while bboxes:
+        bbox1 = bboxes.pop(0)
+        filtered_bboxes.append(bbox1)
+
+        # Keep boxes that have low IoU with the current highest confidence box
         bboxes = [bbox2 for bbox2 in bboxes
                   if calculate_iou(bbox1, bbox2) < iou_threshold]
 
