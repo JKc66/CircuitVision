@@ -3,7 +3,7 @@ numpy
 opencv-python-headless
 Pillow
 PySpice
-google-generativeai
+google-genai
 ultralytics
 torch
 torchvision

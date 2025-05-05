@@ -1,3 +1,12 @@
-.env 
-.streamlit/secrets.toml
-__pycache__/
+
+
+*.pth
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+
+*__pycache__/*
