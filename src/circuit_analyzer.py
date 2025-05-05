@@ -1,7 +1,7 @@
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from ultralytics import YOLO
-from utilities import *
+from .utilities import *
 
 class CircuitAnalyzer():
     def __init__(self, yolo_path='/kaggle/input/circuit/best_large.pt', debug=False):

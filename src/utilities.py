@@ -1,10 +1,6 @@
 # System Imports
 import os
 from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
 import sys, shutil
 from os.path import join, realpath
 import json
@@ -15,7 +11,8 @@ import random
 from copy import deepcopy
 import cv2
 from random import choice
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,13 +23,15 @@ import colorsys
 import random
 import ast
 import tempfile
-from PIL import Image
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import re
 from typing import Union, Dict
 import streamlit as st
 
+
+# Load environment variables from .env file
+load_dotenv()
 
 components_dict = {
     'gnd': 'Ground: A reference point in an electrical circuit. has no direction nor value (both None).',
@@ -238,27 +237,34 @@ def gemini_labels(image_file):
     except KeyError:
         raise ValueError("GEMINI_API_KEY not found in Streamlit secrets")
         
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     
-    # Convert the image file to PIL Image format if it’s a numpy array
+    # Convert the image file to PIL Image format if it's a numpy array
     image_file = Image.fromarray(image_file) 
     
-    #model = genai.GenerativeModel("gemini-1.5-flash-002")
-    model = genai.GenerativeModel("gemini-1.5-pro")
+    #MODEL = "gemini-2.5-flash-preview-04-17"
+    MODEL = "gemini-2.5-pro-exp-03-25"
+    
     prompt = ("Identify only the components and their values in this circuit schematic, the id of each component is in red. return the object as a python list of dictioaries."
               "If the values are just letters or don't exist for the component, the value should be None. If components are defined using complex values, write the complex/imaginary value."
               "Format the output as a list of dictionaries [{'class': 'voltage.dependent', 'value':'35*V_2', 'direction':'down', 'id': '1'}, "
               "{'class': 'voltage.ac', 'value':'22k:30', 'direction': 'None', 'id': '2'}], note how you always use the same ids of the components marked in red in the image, to identify the component. the closest red number to a component that component's id. nothing else. The value of the component should not specify the unit, only the suffix such as k or M or m or nothing, there shouldn't be a space between the number and the suffix. The classes included and their descriptions: " 
               + str(components_dict))
+    
     # Generate content using the image and prompt
-    result = model.generate_content([image_file, "\n\n", prompt], generation_config=genai.types.GenerationConfig(temperature=0.0))
-    print(result.text)
-    # Print the raw result to debug the response
-    #print(result.text)  # Log the response for debugging
-    formatted = result.text.strip('```python\n')
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=[image_file, "\n\n", prompt],
+        config=types.GenerateContentConfig(
+            temperature=0.0
+            )
+    )
+    print(response.text)
+    
+    formatted = response.text.strip('```python\n')
     formatted = formatted.strip('```json\n')
     formatted = formatted.strip('```')
-    parsed_data = ast.literal_eval(formatted)  # Use json.loads instead of ast.literal_eval
+    parsed_data = ast.literal_eval(formatted)
 #     for line in parsed_data:
 #         line['value'] = parse_value(line['value'])
     return parsed_data
@@ -398,11 +404,6 @@ def count_instances(ds, classes_):
 
     return instance_count, class_sampled_ds
 
-
-
-# ... (Import other necessary functions like read_dataset, 
-#      load_classes, load_properties, count_instances, 
-#      file_name, show_image_with_annotations, show_image) 
 
 def calculate_iou(bbox1, bbox2):
     """Calculates IoU for bounding boxes in dictionary format."""

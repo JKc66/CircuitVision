@@ -2,8 +2,8 @@ import streamlit as st
 import numpy as np
 import cv2
 import shutil
-from utilities import summarize_components, gemini_labels
-from circuit_analyzer import CircuitAnalyzer
+from src.utilities import summarize_components, gemini_labels
+from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from pathlib import Path
@@ -20,7 +20,7 @@ st.set_page_config(
 # Set up base paths
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'static/uploads'
-MODEL_PATH = BASE_DIR / 'models/best_large_model.pt'
+MODEL_PATH = BASE_DIR / 'models/best_large_model_yolo.pt'
 
 # Create necessary directories
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
