@@ -115,8 +115,6 @@ def gemini_labels(image_file):
 #         line['value'] = parse_value(line['value'])
     return parsed_data
 
-
-
 def show_image(img, title="Image"):
     plt.figure(figsize=(10, 8))
     if len(img.shape) == 2:  # Grayscale image
