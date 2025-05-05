@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import cv2
 import shutil
-from src.utills import summarize_components, gemini_labels
+from src import utills
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
@@ -145,7 +145,7 @@ if uploaded_file is not None:
         # Detection process
         bboxes = analyzer.bboxes(image)
         progress_bar.progress(33)
-        detection_summary = summarize_components(bboxes)
+        detection_summary = utills.summarize_components(bboxes)
         
         # Display annotated image
         annotated_image = analyzer.get_annotated(image, bboxes)
@@ -204,7 +204,7 @@ if uploaded_file is not None:
         enum_img, bbox_ids = analyzer.enumerate_components(image, bboxes)
         
         with st.spinner("Analyzing component values..."):
-            gemini_info = gemini_labels(enum_img)
+            gemini_info = utills.gemini_labels(enum_img)
             analyzer.fix_netlist(netlist, gemini_info)
             netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
         st.code(netlist_text, language="python")
