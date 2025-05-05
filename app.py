@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import cv2
 import shutil
-from src.utilities import summarize_components, gemini_labels
+from src.utills import summarize_components, gemini_labels
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser

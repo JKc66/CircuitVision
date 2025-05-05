@@ -10,21 +10,14 @@ from random import choice
 import random
 from copy import deepcopy
 import cv2
-from random import choice
 from google import genai
 from google.genai import types
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-import numpy as np
 from scipy.ndimage import zoom
-import colorsys
-import random
 import ast
-import tempfile
-from sklearn.model_selection import train_test_split
-from tqdm import tqdm
 import re
 from typing import Union, Dict
 import streamlit as st
