@@ -5,16 +5,13 @@ import cv2
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
-from .utills import (load_classes, 
-                     non_max_suppression_by_area,
-                     read_image
-                     )
+from . import utills
 
 class CircuitAnalyzer():
     def __init__(self, yolo_path='/kaggle/input/circuit/best_large.pt', debug=False):
         self.yolo = YOLO(yolo_path)
         self.debug = debug
-        self.classes = load_classes()
+        self.classes = utills.load_classes()
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
         self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.battery', 'voltage.dependent', 'current.dc', 'current.dependent'])
@@ -214,7 +211,7 @@ class CircuitAnalyzer():
         
         if bboxes == None:
             bboxes = self.bboxes(image)
-            bboxes = non_max_suppression_by_area(bboxes, iou_threshold=0.6)
+            bboxes = utills.non_max_suppression_by_area(bboxes, iou_threshold=0.6)
 
         # List to store bounding boxes of components that represent text or other objects
         text_bboxes = []
@@ -391,7 +388,7 @@ class CircuitAnalyzer():
 
     def enumerate_components_from_ds(self, example, excluded_labels=None):
         # Read the image using a helper function (customize it as per your dataset structure)
-        image = read_image(example)
+        image = utills.read_image(example)
         
         if excluded_labels == None:
             excluded_labels = self.non_components
@@ -798,7 +795,7 @@ class CircuitAnalyzer():
     
     def get_valid_texts(self, bboxes):
         texts = [bbox for bbox in bboxes if bbox['class'] == 'text']
-        filtered = non_max_suppression_by_area(texts, iou_threshold=0.5)
+        filtered = utills.non_max_suppression_by_area(texts, iou_threshold=0.5)
         return filtered
 
     def generate_netlist_from_nodes(self, node_list):
@@ -959,7 +956,7 @@ class CircuitAnalyzer():
         if self.debug:
             self.show_image(image)
         bboxes = self.bboxes(image)
-        bboxes = non_max_suppression_by_area(bboxes, iou_threshold=0.6)
+        bboxes = utills.non_max_suppression_by_area(bboxes, iou_threshold=0.6)
         if self.debug:
             self.show_annotated(image, bboxes)
 
