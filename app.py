@@ -265,13 +265,6 @@ if uploaded_file is not None:
             else:
                 print(f"Found {len(st.session_state.results['bboxes'])} bboxes in session state")
                 try:
-                    # Get emptied mask and show it for debugging
-                    emptied_mask = analyzer.get_emptied_mask(st.session_state.results['original_image'], st.session_state.results['bboxes'])
-                    st.image(emptied_mask, caption="Debug: Emptied Mask", use_container_width=True)
-                    
-                    # Get enhanced image and show it
-                    enhanced = analyzer.enhance_lines(emptied_mask)
-                    st.image(enhanced, caption="Debug: Enhanced Lines", use_container_width=True)
                     
                     nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization = analyzer.get_node_connections(
                         st.session_state.results['original_image'], 

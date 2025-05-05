@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
-from .utills import (load_classes,
-                     non_max_suppression_by_area,
-                     read_image
+from .utills import (
+    load_classes,
+    non_max_suppression_by_area,
 )
 
 class CircuitAnalyzer():
@@ -28,8 +28,6 @@ class CircuitAnalyzer():
         self.classes = {key: value for key, value in self.classes.items() if key in self.classes_names}
         self.classes = {key: i for i, key, in enumerate(self.classes.keys())}
         
-        self.class2num = self.classes
-        self.num2class = {value: key for key, value in self.classes.items()}
         self.project_classes = set(['gnd', 'voltage.ac', 'voltage.dc', 'voltage.battery', 'resistor', 'voltage.dependent', 'current.dc', 'current.dependent', 'capacitor', 'inductor', 'diode'])
         self.netlist_map = {
             'resistor': 'R',
@@ -389,92 +387,6 @@ class CircuitAnalyzer():
             
         return image, bbox_ids
 
-    def enumerate_components_from_ds(self, example, excluded_labels=None):
-        # Read the image using a helper function (customize it as per your dataset structure)
-        image = read_image(example)
-        
-        if excluded_labels == None:
-            excluded_labels = self.non_components
-            
-        # Get the image dimensions
-        image_height, image_width = image.shape[:2]
-
-        # Calculate a relative font scale based on the image height
-        font_scale = max(0.5, image_height / 800.0)  # You can adjust the denominator to scale as desired
-        thickness = int(max(1, image_height / 400.0))  # Adjust the thickness relative to the image size
-
-        bbox_counter = 0  # Initialize counter to number each bbox
-
-        # Check for 'polygons' first
-        if 'polygons' in example and example['polygons']:
-            for bbox in example['polygons']:
-                c = bbox['class']
-                if excluded_labels and c in excluded_labels:
-                    continue  # Skip if the class is in the excluded set
-
-                b = bbox['bbox']
-                xmin, ymin = int(b['xmin']), int(b['ymin'])
-                xmax, ymax = int(b['xmax']), int(b['ymax'])
-
-                # Draw the bounding box in red
-                #cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color=(0, 0, 255), thickness=thickness)
-
-                # Increment counter for each bbox and assign a number
-                bbox_counter += 1
-
-                # Draw the class name and number
-                text_x = xmax + int(10 * font_scale)
-                text_y = ymax + int(10 * font_scale)  # Adjust the offset based on the font scale
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                color = (0, 0, 255)  # Red color for the text
-
-                # Draw the class name with the number
-                cv2.putText(image, f"{bbox_counter}", (text_x, text_y), font, font_scale, color, thickness)
-
-        # Check for 'bboxes' if 'polygons' is not found
-        elif 'bboxes' in example and example['bboxes']:
-            for bbox in example['bboxes']:
-                c = bbox['class']
-                if excluded_labels and c in excluded_labels:
-                    continue  # Skip if the class is in the excluded set
-
-                b = bbox
-                xmin, ymin = int(b['xmin']), int(b['ymin'])
-                xmax, ymax = int(b['xmax']), int(b['ymax'])
-
-                # Draw the bounding box in red
-                #cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color=(0, 0, 255), thickness=thickness)
-
-                # Increment counter for each bbox and assign a number
-                bbox_counter += 1
-
-                # Draw the class name, number, and optional rotation if available
-                text_x = xmax + int(10 * font_scale)
-                text_y = ymax + int(10 * font_scale)  # Adjust the offset as needed
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                color = (0, 0, 255)  # Red color for the text
-
-                # Add rotation information if available
-                try:
-                    r = bbox['rotation']
-                except KeyError:
-                    r = None
-
-                if r != 'None' and r is not None:
-                    cv2.putText(image, f"{bbox_counter}", (text_x, text_y), font, font_scale, color, thickness)
-                else:
-                    cv2.putText(image, f"{bbox_counter}", (text_x, text_y), font, font_scale, color, thickness)
-
-        # Convert image from BGR to RGB for displaying with Matplotlib
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Display the image using Matplotlib
-        if self.debug:
-            plt.figure(figsize=(10, 10))
-            plt.imshow(image_rgb)
-            plt.axis("off")  # Hide axis
-            plt.show()
-
 
     def resize_image_keep_aspect(self, image, bboxes, new_height=600):
         """
@@ -571,53 +483,6 @@ class CircuitAnalyzer():
         plt.show()
         return img
     
-    def show_annotated(self, image, bboxes=None, name='Annotated'):
-        image = image.copy()
-        if bboxes == None:
-            bboxes = self.bboxes(image)
-        for bbox in bboxes:
-            c = bbox['class']
-            b = bbox
-            xmin, ymin = int(b['xmin']), int(b['ymin'])
-            xmax, ymax = int(b['xmax']), int(b['ymax'])
-            cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color=(0, 255, 0), thickness=1)
-            
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.2
-            thickness = 1
-            color = (0, 0, 255)  # Red color
-            text_x = xmax
-            text_y = ymax + 10  # Adjust the offset as needed
-            cv2.putText(image, f"{c}", (text_x, text_y), font, font_scale, color, thickness)
-        
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Display the image using Matplotlib
-        self.show_image(image_rgb, name)
-    
-    def get_annotated(self, image, bboxes=None, name='Annotated'):
-        image = image.copy()
-        if bboxes == None:
-            bboxes = self.bboxes(image)
-        for bbox in bboxes:
-            c = bbox['class']
-            b = bbox
-            xmin, ymin = int(b['xmin']), int(b['ymin'])
-            xmax, ymax = int(b['xmax']), int(b['ymax'])
-            cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color=(0, 255, 0), thickness=1)
-            
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.2
-            thickness = 1
-            color = (0, 0, 255)  # Red color
-            text_x = xmax
-            text_y = ymax + 10  # Adjust the offset as needed
-            cv2.putText(image, f"{c}", (text_x, text_y), font, font_scale, color, thickness)
-        
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Display the image using Matplotlib
-        return image
     
     def get_node_connections(self, image, bboxes, original_size=False):
         original = image.copy()
@@ -806,10 +671,7 @@ class CircuitAnalyzer():
         return new_nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization
 
     
-    def get_valid_texts(self, bboxes):
-        texts = [bbox for bbox in bboxes if bbox['class'] == 'text']
-        filtered = non_max_suppression_by_area(texts, iou_threshold=0.5)
-        return filtered
+
 
     def generate_netlist_from_nodes(self, node_list):
         netlist = []
@@ -962,132 +824,6 @@ class CircuitAnalyzer():
                 else:
                     continue
     
-    def process_image_to_netlist(self, image_path):
-        image = cv2.imread(image_path)
-            
-        # Show and process the image to get bounding boxes and netlist
-        if self.debug:
-            self.show_image(image)
-        bboxes = self.bboxes(image)
-        bboxes = non_max_suppression_by_area(bboxes, iou_threshold=0.6)
-        if self.debug:
-            self.show_annotated(image, bboxes)
-
-        # Generate nodes and netlist
-        nodes = self.get_node_connections(image, bboxes, original_size=True)
-        netlist = self.generate_netlist_from_nodes(nodes)
-        if self.debug:
-            for n in nodes:
-                print(f"Node {n['id']}:", [i['class'] for i in n['components']])
-            
-            #print(netlist)
-        # Get component information and fix netlist
-        #enum_img, _ = self.enumerate_components(image, netlist)
-        #gemini_info = gemini_labels(enum_img)
-        #self.fix_netlist(netlist, gemini_info)
-        return netlist, nodes
-
-    def netlsit_aligns_with_project(self, netlist):
-        for i in netlist:
-            if i['class'] not in self.project_classes and i['class'].split('.')[0] not in self.project_classes:
-                return False
-        return True
-
-    def image_aligns_with_project(self, image):
-        bboxes = self.bboxes(image)
-        for i in bboxes:
-            if i['class'] in self.non_components:
-                continue
-            if i['class'] not in self.project_classes and i['class'].split('.')[0] not in self.project_classes and i['class'] != 'unknown':
-                return False
-        return True
-
-    def validate_circuit(self, nodes):
-        """
-        Validates if a circuit configuration is valid based on the following rules:
-        1. Must have at least one source component
-        2. Must have at least one ground component
-        3. Each node must have at least 2 components (except possibly terminal nodes)
-        4. Circuit must be connected (no isolated components/nodes)
-        5. Components must have valid connections
-        
-        Args:
-            nodes: List of dictionaries containing node information with format:
-                [{'id': int, 'components': [{...}], 'contour': array}, ...]
-        
-        Returns:
-            tuple: (bool, str) - (is_valid, error_message)
-        """
-        if not nodes:
-            return False, "No nodes found in the circuit"
-        
-        # Check for source and ground
-        all_components = []
-        for node in nodes:
-            all_components.extend(node['components'])
-        
-        has_source = any(comp['class'] in self.source_components for comp in all_components)
-        
-        if not has_source:
-            return False, "Circuit missing power source"
-            
-        def find_connected_nodes(start_node, nodes_list):
-            connected = set([start_node['id']])
-            stack = [start_node]
-            
-            while stack:
-                current_node = stack.pop()
-                # Create a unique identifier for each component based on its bbox coordinates
-                current_components = set(
-                    f"{comp.get('xmin', '')},{comp.get('ymin', '')},{comp.get('xmax', '')},{comp.get('ymax', '')}"
-                    for comp in current_node['components']
-                )
-                
-                for node in nodes_list:
-                    if node['id'] not in connected:
-                        node_components = set(
-                            f"{comp.get('xmin', '')},{comp.get('ymin', '')},{comp.get('xmax', '')},{comp.get('ymax', '')}"
-                            for comp in node['components']
-                        )
-                        # If there's any shared component, nodes are connected
-                        if current_components & node_components:
-                            connected.add(node['id'])
-                            stack.append(node)
-            
-            return connected
-        
-        # Start from node 0 (which should be the main power node based on the original code)
-        connected_nodes = find_connected_nodes(nodes[0], nodes)
-        
-        if len(connected_nodes) != len(nodes):
-            return False, "Circuit contains disconnected sections"
-        
-        # Check component counts per node
-        for node in nodes:
-            component_count = len(node['components'])
-            if component_count < 2:
-                return False, f"Node {node['id']} has insufficient connections ({component_count})"
-            
-            # Check for invalid component combinations
-            component_classes = [comp['class'] for comp in node['components']]
-            
-            # Rule: A node shouldn't connect multiple sources directly
-            if component_classes.count('source') > 1:
-                return False, f"Node {node['id']} has multiple sources connected"
-            
-            # Rule: A node shouldn't connect multiple grounds directly
-            if component_classes.count('ground') > 1:
-                return False, f"Node {node['id']} has multiple grounds connected"
-        
-        # Check for short circuits (direct source to ground connection)
-        for node in nodes:
-            component_classes = set(comp['class'] for comp in node['components'])
-            if 'source' in component_classes and 'ground' in component_classes:
-                return False, f"Short circuit detected at node {node['id']}"
-        
-        # If all checks pass, the circuit is valid
-        return True, "Circuit configuration is valid"
-
-            
+    
     def stringify_line(self, netlist_line):
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
