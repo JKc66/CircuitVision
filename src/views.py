@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 import os
 import shutil
-from .utilities import summarize_components, gemini_labels
+from .utills import summarize_components, gemini_labels
 from .circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Probe.Plot import plot
