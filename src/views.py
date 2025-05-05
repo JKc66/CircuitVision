@@ -12,7 +12,7 @@ from PySpice.Spice.Parser import SpiceParser
 from PySpice.Spice.Simulation import CircuitSimulation
 from pathlib import Path
 
-analyzer = CircuitAnalyzer(yolo_path='models/best_large_model_yolo.pt', debug=False)
+analyzer = CircuitAnalyzer(yolo_path='models/models/YOLO/best_large_model_yolo.pt', debug=False)
 files_location = 'static/assets/uploads/'
 components_dict = {
     'gnd': 'Ground: A reference point in an electrical circuit. has no direction nor value (both None).',
