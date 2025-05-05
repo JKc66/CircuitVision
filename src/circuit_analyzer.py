@@ -652,10 +652,16 @@ class CircuitAnalyzer():
             if self.debug:
                 for i in range(len(x)):
                     cv2.circle(harris_image, (x[i], y[i]), 3, (0, 255, 0), -1)  # Red circles, filled
+            
+            # Skip clustering if no corners were detected
+            if len(coordinates) == 0:
+                print(f"Warning: No corners detected for contour {contour['id']}")
+                contour['corners'] = np.array([])
+                continue
                 
             scaler = StandardScaler()
             coordinates_scaled = scaler.fit_transform(coordinates)
-            dbscan = DBSCAN(eps=0.07, min_samples=3)  # Experiment with these parameters!
+            dbscan = DBSCAN(eps=0.07, min_samples=3)
             labels = dbscan.fit_predict(coordinates_scaled)
             unique_labels = set(labels)
             centers = []
@@ -666,9 +672,13 @@ class CircuitAnalyzer():
                     centers.append(center)
             centers = np.array(centers)
             
-            # Apply k-means clustering 
-            #criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 0.5)
-            #compactness, labels, centers = cv2.kmeans(coordinates, K=30, bestLabels=None, criteria=criteria, attempts=10, flags=cv2.KMEANS_RANDOM_CENTERS)
+            # If no valid clusters were found, use the original corner points
+            if len(centers) == 0:
+                print(f"Warning: No valid clusters found for contour {contour['id']}, using original corners")
+                # Use a subset of original corners to avoid too many points
+                step = max(1, len(coordinates) // 10)  # Take at most 10 corners
+                centers = coordinates[::step]
+            
             contour['corners'] = centers
             
         if self.debug:
