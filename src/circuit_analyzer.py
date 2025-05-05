@@ -126,7 +126,6 @@ class CircuitAnalyzer():
         # Find contours 
         contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-
         # Create a blank color image for visualization
         contour_img = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
 
