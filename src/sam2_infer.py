@@ -387,8 +387,6 @@ def get_modified_sam2(
         print("Wrapper applied.")
     else:
         print("Skipping SAM2ImageWrapper.")
-        # If not using the wrapper, ensure the training loop correctly calls
-        # the PEFT model with the image-only logic and handles prompts.
 
     # 4. Final Verification of Trainable Parameters
     print("\n--- Final Trainable Parameters ---")

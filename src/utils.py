@@ -19,8 +19,11 @@ from PIL import Image
 from scipy.ndimage import zoom
 import ast
 import re
-from typing import Union, Dict
+from typing import Union, Dict, List
 import streamlit as st
+import openai
+import base64
+import io
 
 
 # Load environment variables from .env file
@@ -94,11 +97,10 @@ def gemini_labels(image_file):
         dict: A dictionary with component names as keys and a list of their
               values as entries.
     """
-    # Load API key from Streamlit secrets
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        raise ValueError("GEMINI_API_KEY not found in Streamlit secrets")
+    api_key = os.getenv("GEMINI_API_KEY")
+    
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in environment variables. Please set it in your .env file.")
         
     client = genai.Client(api_key=api_key)
     
@@ -141,6 +143,97 @@ def gemini_labels(image_file):
             raise ValueError(f"Failed to parse Gemini response: {e2}. Original response: {formatted}")
 #     for line in parsed_data:
 #         line['value'] = parse_value(line['value'])
+
+def gemini_labels_openrouter(image_file):
+    """
+    Uploads an image of a circuit schematic to OpenRouter (using OpenAI SDK)
+    to analyze components with a Gemini model, retrieves the components and
+    their values, and returns them in a structured format.
+
+    Args:
+        image_file (np.ndarray): Image array of the circuit schematic.
+
+    Returns:
+        dict: A dictionary with component names as keys and a list of their
+              values as entries.
+    """
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    
+    if not openrouter_api_key:
+        raise ValueError("OPENROUTER_API_KEY not found in environment variables. Please set it in your .env file.")
+        
+    client = openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_api_key,
+    )
+    
+    # Convert numpy array to PIL Image
+    pil_image = Image.fromarray(image_file)
+
+    # Convert PIL Image to base64
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="PNG")
+    base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    
+    # Using OpenRouter's model
+    OPENROUTER_MODEL = "google/gemini-2.5-pro-preview"
+    
+    headers = {
+        "HTTP-Referer": "http://localhost/sdp_circuit_analyzer",
+        "X-Title": "Circuit Analyzer"
+    }   
+
+    try:
+        response = client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=0,
+            extra_headers=headers
+        )
+        
+        if not response.choices or len(response.choices) == 0:
+            raise ValueError("OpenRouter API response did not contain any choices.")
+        
+        response_text = response.choices[0].message.content
+        print(response_text)
+        
+        # Clean up the response text
+        formatted = response_text.strip('```python\n')
+        formatted = formatted.strip('```json\n')
+        formatted = formatted.strip('```')
+        
+        try:
+            import json
+            # Parse using json.loads() instead of ast.literal_eval() to handle null values properly
+            parsed_data = json.loads(formatted)
+            return parsed_data
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON response: {e}")
+            print(f"Raw response: {formatted}")
+            # Fallback: Try to convert null to None for ast.literal_eval
+            try:
+                formatted = formatted.replace('null', 'None')
+                parsed_data = ast.literal_eval(formatted)
+                return parsed_data
+            except Exception as e2:
+                print(f"Fallback parsing also failed: {e2}")
+                raise ValueError(f"Failed to parse OpenRouter response: {e2}. Original response: {formatted}")
+    except openai.APIError as e:
+        print(f"OpenRouter API Error with model {OPENROUTER_MODEL}: {e}")
+        raise ValueError(f"OpenRouter API request failed: {str(e)}")
 
 def show_image(img, title="Image"):
     plt.figure(figsize=(10, 8))
