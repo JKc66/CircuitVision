@@ -10,8 +10,26 @@ from .utills import (
     non_max_suppression_by_area,
 )
 
+# +++ SAM 2 Imports +++
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+import warnings
+# Import SAM2 components from sam2_infer
+from .sam2_infer import (
+    SAM2Transforms,
+    get_modified_sam2,
+    device
+)
+
 class CircuitAnalyzer():
-    def __init__(self, yolo_path='/kaggle/input/circuit/best_large.pt', debug=False):
+    def __init__(self, yolo_path='D:/SDP_demo/models/YOLO/best_large_model_yolo.pt', 
+                 sam2_config_path='D:/SDP_demo/models/configs/sam2.1_hiera_l.yaml',
+                 sam2_base_checkpoint_path='D:/SDP_demo/models/SAM2/sam2.1_hiera_large.pt',
+                 sam2_finetuned_checkpoint_path='D:/SDP_demo/models/SAM2/best_miou_model_SAM_latest.pth',
+                 use_sam2=True,
+                 debug=False):
         self.yolo = YOLO(yolo_path)
         self.debug = debug
         self.classes = load_classes()
@@ -46,9 +64,9 @@ class CircuitAnalyzer():
             'voltage.ac': 'V',
             'voltage.dc': 'V',
             'voltage.battery': 'V',
-            'voltage.dependent': 'E', # Added dependent voltage source
-            'current.dc': 'I',        # Added DC current source
-            'current.dependent': 'G', # Added dependent current source
+            'voltage.dependent': 'E',
+            'current.dc': 'I',
+            'current.dependent': 'G',
             'vss': 'GND',
             'gnd': '0',
             'switch': 'S',
@@ -57,7 +75,7 @@ class CircuitAnalyzer():
             'operational_amplifier': 'X',
             'thyristor': 'Q',
             'transformer': 'T',
-            'varistor': 'RV',  # Note: potential conflict with voltage sources. Consider using 'RV'
+            'varistor': 'RV',
             'terminal': 'N',
             'junction': '',
             'crossover': '',
@@ -65,6 +83,44 @@ class CircuitAnalyzer():
             'text': '',
             'unknown': 'UN',
         }
+        
+        # +++ SAM2 Initialization +++
+        self.use_sam2 = use_sam2
+        self.sam2_model = None
+        self.sam2_transforms = None
+        self.sam2_device = None
+
+        if self.use_sam2:
+            try:
+                print("--- Initializing SAM2 ---")
+                # Import SAM2 model and transforms from sam2_infer
+                # We use the already initialized model from sam2_infer
+                from .sam2_infer import modified_sam2, _transforms, device
+                
+                self.sam2_device = device
+                print(f"Using SAM2 device: {self.sam2_device}")
+                
+                # Use the pre-initialized model
+                self.sam2_model = modified_sam2
+                self.sam2_model.eval()  # Ensure it's in evaluation mode
+                
+                # Use the pre-initialized transforms
+                self.sam2_transforms = _transforms
+                
+                print("SAM2 Model imported successfully")
+                print("--- SAM2 Ready ---")
+
+            except Exception as e:
+                print(f"An unexpected error occurred during SAM2 initialization: {e}")
+                import traceback
+                print(traceback.format_exc())
+                print("SAM2 will be disabled.")
+                self.use_sam2 = False
+                self.sam2_model = None
+                self.sam2_transforms = None
+                self.sam2_device = None
+        else:
+            print("SAM2 usage is disabled in configuration.")
         
     def bboxes(self, image):
         results = self.yolo.predict(image, verbose=True)
@@ -107,6 +163,55 @@ class CircuitAnalyzer():
         # applying adaptive threshold
         img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 21)
         return img
+    
+    def segment_with_sam2(self, image_np_bgr):
+        """
+        Segments the circuit diagram using the loaded SAM 2 model.
+
+        Args:
+            image_np_bgr (np.ndarray): Input image in BGR format (from cv2.imread).
+
+        Returns:
+            np.ndarray: Binary mask (uint8, 0 or 255) where 255 represents wires/connections,
+                        at the original image resolution. Returns None if SAM 2 is not available or fails.
+        """
+        if not self.use_sam2 or self.sam2_model is None or self.sam2_transforms is None:
+            print("SAM 2 is not available or not initialized. Cannot segment.")
+            return None
+
+        print("Segmenting with SAM 2...")
+        try:
+            # 1. Prepare Input Image
+            image_np_rgb = cv2.cvtColor(image_np_bgr, cv2.COLOR_BGR2RGB)
+            image_pil = Image.fromarray(image_np_rgb)
+            orig_hw = image_np_rgb.shape[:2]
+
+            # 2. Preprocess
+            image_tensor = self.sam2_transforms(image_pil).unsqueeze(0).to(self.sam2_device)
+
+            # 3. Inference
+            self.sam2_model.eval() # Ensure evaluation mode
+            with torch.no_grad():
+                # Use the SAM2 model from sam2_infer
+                high_res_mask, low_res_mask, _ = self.sam2_model(image_tensor)
+                # Choose high_res mask for better detail
+                chosen_mask = high_res_mask
+
+            # 4. Postprocess
+            final_mask_tensor = self.sam2_transforms.postprocess_masks(chosen_mask, orig_hw) # Shape (1, 1, H, W)
+
+            # 5. Convert to Binary NumPy Mask
+            mask_squeezed = final_mask_tensor.detach().cpu().squeeze() # Shape (H, W)
+            mask_binary_np = (mask_squeezed > 0.0).numpy().astype(np.uint8) * 255 # Threshold and scale to 0/255
+
+            print("SAM 2 Segmentation successful.")
+            return mask_binary_np
+
+        except Exception as e:
+            print(f"Error during SAM 2 segmentation: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None # Return None on failure
     
     def get_contours(self, img, area_threshold=0.00040):
         """
@@ -486,15 +591,56 @@ class CircuitAnalyzer():
     def get_node_connections(self, image, bboxes, original_size=False):
         original = image.copy()
         image = image.copy()
-        emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+        
+        # --- Segmentation ---
+        if self.use_sam2:
+            # Try SAM2 segmentation
+            wire_mask = self.segment_with_sam2(image)
+            if wire_mask is None:
+                print("SAM2 segmentation failed, falling back to traditional segmentation")
+                # Fallback to traditional segmentation
+                emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+            else:
+                # Get emptied mask from SAM2 segmentation
+                emptied_mask = wire_mask.copy()
+                height, width = emptied_mask.shape[:2]
+                
+                # Empty out component areas
+                for bbox in bboxes:
+                    if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
+                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
+                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
+                        if ymin < ymax and xmin < xmax:
+                            emptied_mask[ymin:ymax, xmin:xmax] = 0
+                
+                # Apply circuit bbox if present
+                for bbox in bboxes:
+                    if bbox['class'] == 'circuit':
+                        new_mask = np.zeros_like(emptied_mask)
+                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
+                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
+                        if ymin < ymax and xmin < xmax:
+                            new_mask[ymin:ymax, xmin:xmax] = emptied_mask[ymin:ymax, xmin:xmax]
+                        emptied_mask = new_mask
+                        break
+                
+                # Resize for processing
+                emptied_mask, resized_bboxes = self.resize_image_keep_aspect(emptied_mask, bboxes)
+        else:
+            # Use traditional segmentation
+            emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+        
         if self.debug:
             self.show_image(emptied_mask, 'Emptied')
+            
         enhanced = self.enhance_lines(emptied_mask)
         if self.debug:
             self.show_image(enhanced, 'Enhanced')
+            
         contours, contour_image = self.get_contours(enhanced)
         if self.debug:
             self.show_image(contour_image, 'Contours')
+            
         nodes = {i['id']:{'id': i['id'], 'components': [], 'contour': i['contour']} for i in contours}
 
         harris_image = contour_image.copy()
