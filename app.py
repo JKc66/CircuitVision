@@ -87,7 +87,7 @@ def load_circuit_analyzer():
             sam2_base_checkpoint_path=str(SAM2_BASE_CHECKPOINT_PATH),
             sam2_finetuned_checkpoint_path=str(SAM2_FINETUNED_CHECKPOINT_PATH),
             use_sam2=use_sam2_feature,
-            debug=False
+            debug=True
         )
         return analyzer
     except Exception as e:
@@ -280,7 +280,13 @@ if uploaded_file is not None:
                 logger.debug("Calling Gemini for component labeling...")
                 gemini_info = gemini_labels_openrouter(enum_img)
                 logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
-                analyzer.fix_netlist(netlist, gemini_info)
+                analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
+                
+                # Debug: Log the state of netlist lines before stringifying
+                if logger.isEnabledFor(logging.DEBUG):
+                    for i, ln_debug in enumerate(netlist):
+                        logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
+                        
                 netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
                 logger.debug("Final netlist generation complete")
                 
