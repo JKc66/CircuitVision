@@ -24,7 +24,6 @@ if __name__ == "__main__":
 files_to_combine = [
     "src/circuit_analyzer.py",
     "src/utills.py",
-    "src/views.py",
     "src/sam2_infer.py",
     "app.py"
 ]
