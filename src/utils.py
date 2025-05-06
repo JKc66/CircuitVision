@@ -165,6 +165,10 @@ def gemini_labels_openrouter(image_file):
     client = openai.OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=openrouter_api_key,
+        default_headers={
+            "HTTP-Referer": "http://circuit-analyzer",
+            "X-Title": "Circuit Analyzer"
+        }
     )
     
     # Convert numpy array to PIL Image
@@ -178,11 +182,6 @@ def gemini_labels_openrouter(image_file):
     # Using OpenRouter's model
     OPENROUTER_MODEL = "google/gemini-2.5-pro-preview"
     
-    headers = {
-        "HTTP-Referer": "http://localhost/sdp_circuit_analyzer",
-        "X-Title": "Circuit Analyzer"
-    }   
-
     try:
         response = client.chat.completions.create(
             model=OPENROUTER_MODEL,
@@ -201,7 +200,6 @@ def gemini_labels_openrouter(image_file):
                 }
             ],
             temperature=0,
-            extra_headers=headers
         )
         
         if not response.choices or len(response.choices) == 0:

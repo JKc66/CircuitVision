@@ -29,6 +29,10 @@ logging.basicConfig(
 logger = logging.getLogger("circuit_analyzer")
 logger.info(f"Initializing Circuit Analyzer with log level: {log_level}")
 
+# Reduce verbosity of httpcore and openai loggers
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+
 torch.classes.__path__ = []
 
 # Set page config and custom styles
@@ -106,10 +110,7 @@ if analyzer is None:
 else:
     logger.info("Circuit analyzer initialized successfully. Application ready.")
 
-# Create containers for results and history
-if 'run_history' not in st.session_state:
-    st.session_state.run_history = []
-
+# Create containers for results
 if 'active_results' not in st.session_state:
     st.session_state.active_results = {
         'bboxes': None,
@@ -144,18 +145,6 @@ if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
     st.info("✅ Model loaded successfully")
 else:
     st.warning("⚠️ Model loading failed")
-
-# Sidebar for Run History
-st.sidebar.title("📜 Run History")
-if not st.session_state.run_history:
-    st.sidebar.info("No analysis runs recorded yet.")
-else:
-    # Display runs in reverse chronological order (newest first)
-    for item in reversed(st.session_state.run_history):
-        if st.sidebar.button(item["display_name"], key=item["run_id"]):
-            st.session_state.active_results = deepcopy(item["results"])
-            # Note: elapsed_time is already part of item["results"]
-            st.experimental_rerun() # Rerun to update the main page display
 
 # File upload section
 uploaded_file = st.file_uploader(
@@ -323,20 +312,6 @@ if uploaded_file is not None:
             
             # Store elapsed time in active results
             st.session_state.active_results['elapsed_time'] = elapsed_time
-
-            # Save the current run to history
-            history_item = {
-                "run_id": f"{time.time()}_{st.session_state.active_results.get('uploaded_file_name', 'unknown')}",
-                "display_name": (
-                    st.session_state.active_results.get('uploaded_file_name', 'Run') + 
-                    f" - {time.strftime('%Y-%m-%d %H:%M:%S')}"
-                ),
-                "results": deepcopy(st.session_state.active_results),
-                "elapsed_time": elapsed_time
-            }
-            st.session_state.run_history.append(history_item)
-            # Limit history to the last 10 runs
-            st.session_state.run_history = st.session_state.run_history[-10:]
     
     # Display results section after analysis
     if st.session_state.active_results['original_image'] is not None:
