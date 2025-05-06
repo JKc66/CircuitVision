@@ -406,8 +406,3 @@ def get_modified_sam2(
     print("--- Modified SAM2 Structure Ready ---")
     return final_model
 
-# The following code has been removed:
-# 1. Module-level model loading
-# 2. Hardcoded paths
-# 3. Predefined transforms
-# The model and transforms will now be initialized in circuit_analyzer.py when needed

@@ -100,47 +100,50 @@ class CircuitAnalyzer():
                 print(f"Using SAM2 device: {self.sam2_device}")
                 
                 # Define LoRA target modules
-                base_parts = ["sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
-                            "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
-                            "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
-                            "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
-                            "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
-                            "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
-                            "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
-                            "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
-                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
-                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
-                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
-                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
-                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
-                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
-                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
-                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
-                            "sam_mask_decoder.transformer.layers.0.mlp.layers.0",
-                            "sam_mask_decoder.transformer.layers.0.mlp.layers.1",
-                            "sam_mask_decoder.transformer.layers.1.mlp.layers.0",
-                            "sam_mask_decoder.transformer.layers.1.mlp.layers.1"]
+                base_parts = [
+                    "sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
+                    "sam_mask_decoder.transformer.layers.0.mlp.layers.0",
+                    "sam_mask_decoder.transformer.layers.0.mlp.layers.1",
+                    "sam_mask_decoder.transformer.layers.1.mlp.layers.0",
+                    "sam_mask_decoder.transformer.layers.1.mlp.layers.1"
+                    ]
                 added_parts = [
-                        "sam_mask_decoder.iou_prediction_head.layers.2",
-                         "sam_mask_decoder.conv_s0",
-                         "sam_mask_decoder.conv_s1",
-                         
-                         "image_encoder.neck.convs.2.conv",
-                        "image_encoder.neck.convs.3.conv", 
-                         
-                         "image_encoder.trunk.blocks.44.attn.qkv", # for downsampling
-                          "image_encoder.trunk.blocks.44.mlp.layers.0",
-                          "image_encoder.trunk.blocks.44.proj",
-
-                        "image_encoder.trunk.blocks.47.attn.qkv",
-                        "image_encoder.trunk.blocks.47.mlp.layers.0",
+                    "sam_mask_decoder.iou_prediction_head.layers.2",
+                    "sam_mask_decoder.conv_s0",
+                    "sam_mask_decoder.conv_s1",
                         
-                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
-                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
-                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
-                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
-                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
-                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",]
+                    "image_encoder.neck.convs.2.conv",
+                    "image_encoder.neck.convs.3.conv", 
+                        
+                    "image_encoder.trunk.blocks.44.attn.qkv", # for downsampling
+                    "image_encoder.trunk.blocks.44.mlp.layers.0",
+                    "image_encoder.trunk.blocks.44.proj",
+
+                    "image_encoder.trunk.blocks.47.attn.qkv",
+                    "image_encoder.trunk.blocks.47.mlp.layers.0",
+                    
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
+                    ]
                 
                 # Build Model Structure using the provided paths
                 print(f"Building SAM2 model with config: {sam2_config_path} and base checkpoint: {sam2_base_checkpoint_path}")
@@ -740,96 +743,78 @@ class CircuitAnalyzer():
         # Initialize nodes dictionary with all contours
         nodes = {i['id']:{'id': i['id'], 'components': [], 'contour': i['contour']} for i in contours}
 
-        harris_image = contour_image.copy()
-        for contour in contours:
-            # Convert the contour to a grayscale image (for Harris corner detection)
-            mask = np.zeros_like(enhanced, dtype=np.uint8)
-            cv2.drawContours(mask, [contour['contour']], -1, (255, 255, 255), -1)
-            normalizer = mask.shape[0] * mask.shape[1]
-            # Harris corner detection
-            gray = mask
-            gray = 255 - gray
-            gray = np.float32(gray)
-            dst = cv2.cornerHarris(gray, blockSize=3, ksize=3, k=0.015)
-            dst = cv2.dilate(dst, None)  # Dilate to mark corners stronger
-            # Threshold for corner detection
-            corners = dst > 0.1 * dst.max()
-            corner_points = np.argwhere(corners)
-            thresh = 0.1 * dst.max()
-            y, x = np.where(dst > thresh)
-            coordinates = np.float32(np.stack((x, y), axis=-1))
+        # Loop through components to find connections
+        # Initialize rects_image for debug visualization of component-contour overlaps
+        # This image will show the contours and then bounding boxes of components being checked.
+        # If self.debug is true, it's shown at the end of this loop.
+        # We make a fresh copy from contour_image as it's a good base.
+        # Note: Previously rects_image was based on corners_image.
+        rects_image = contour_image.copy()
 
-            if self.debug:
-                for i in range(len(x)):
-                    cv2.circle(harris_image, (x[i], y[i]), 3, (0, 255, 0), -1)  # Red circles, filled
-            
-            # Skip clustering if no corners were detected
-            if len(coordinates) == 0:
-                print(f"Warning: No corners detected for contour {contour['id']}")
-                contour['corners'] = np.array([])
+        for i, bbox_comp in enumerate(resized_bboxes):
+            if bbox_comp['class'] in self.non_components:
                 continue
+            
+            # For debugging, can re-initialize rects_image per component if needed
+            # rects_image = contour_image.copy() 
+            xmin_comp, ymin_comp = int(bbox_comp['xmin']), int(bbox_comp['ymin'])
+            xmax_comp, ymax_comp = int(bbox_comp['xmax']), int(bbox_comp['ymax'])
+    
+            for contour_item in contours: # Iterate over each contour (potential wire)
+                # Bounding box of the current contour
+                c_xmin_contour, c_ymin_contour, c_width_contour, c_height_contour = contour_item['rectangle']
+                c_xmax_contour = c_xmin_contour + c_width_contour
+                c_ymax_contour = c_ymin_contour + c_height_contour
                 
-            scaler = StandardScaler()
-            coordinates_scaled = scaler.fit_transform(coordinates)
-            dbscan = DBSCAN(eps=0.07, min_samples=3)
-            labels = dbscan.fit_predict(coordinates_scaled)
-            unique_labels = set(labels)
-            centers = []
-            for label in unique_labels:
-                if label != -1:  # Ignore noise points (-1)
-                    cluster_points = coordinates[labels == label]
-                    center = np.mean(cluster_points, axis=0)
-                    centers.append(center)
-            centers = np.array(centers)
-            
-            # If no valid clusters were found, use the original corner points
-            if len(centers) == 0:
-                print(f"Warning: No valid clusters found for contour {contour['id']}, using original corners")
-                # Use a subset of original corners to avoid too many points
-                step = max(1, len(coordinates) // 10)  # Take at most 10 corners
-                centers = coordinates[::step]
-            
-            contour['corners'] = centers
-            
-        if self.debug:
-            self.show_image(harris_image, 'Harris Corners')
-        corners_image = contour_image.copy()   
-        # Draw circles at cluster centers
-        for contour in contours:
-            for center in contour['corners']:
-                cv2.circle(corners_image, (int(center[0]), int(center[1])), 3, (0, 0, 255), -1)
-        if self.debug:
-            self.show_image(corners_image, 'Corners')
+                # Draw contour rectangle (for debugging visualization)
+                cv2.rectangle(rects_image, (c_xmin_contour, c_ymin_contour), (c_xmax_contour, c_ymax_contour), color=(0, 255, 0), thickness=1) 
+    
+                # Broad phase: Check if component's bbox and contour's bbox overlap
+                if xmax_comp < c_xmin_contour or xmin_comp > c_xmax_contour or ymax_comp < c_ymin_contour or ymin_comp > c_ymax_contour:
+                    continue # No overlap between bounding boxes, so this contour cannot connect to this component
+                
+                # Narrow phase: Iterate through each point of the actual contour
+                # contour_item['contour'] is a NumPy array of points (e.g., [[[x1,y1]], [[x2,y2]], ...])
+                for point_array in contour_item['contour']:
+                    point = tuple(point_array[0]) # Extract (x,y) from [[x,y]]
+                    
+                    if self.is_point_near_bbox(point, bbox_comp, pixel_threshold=6):
+                        # A point on the contour is near the component's bbox
+                        target_bbox_to_add = bboxes[i] if original_size else bbox_comp
+                        
+                        # Check if this component is already associated with this node to avoid duplicates.
+                        # Construct a unique identifier for the component.
+                        component_id_tuple = (
+                            target_bbox_to_add['class'], 
+                            target_bbox_to_add['xmin'], target_bbox_to_add['ymin'],
+                            target_bbox_to_add['xmax'], target_bbox_to_add['ymax'],
+                            target_bbox_to_add.get('id') # Include 'id' if present (e.g., from enumerate_components)
+                        )
 
-        for i, bbox in enumerate(resized_bboxes):
-            if bbox['class'] in self.non_components:
-                continue
-            possible_contours = []
-            rects_image = corners_image.copy()
-            xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
-            xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
-    
-            for contour in contours:
-                c_xmin = contour['rectangle'][0]
-                c_ymin = contour['rectangle'][1]
-                c_xmax = c_xmin + contour['rectangle'][2]
-                c_ymax = c_ymin + contour['rectangle'][3]
-                cv2.rectangle(rects_image, (c_xmin, c_ymin), (c_xmax, c_ymax), color=(0, 255, 0), thickness=1)
-    
-                if ymax < c_ymin or ymin > c_ymax or xmax < c_xmin or xmin > c_xmax:
-                    continue
-                else:
-                    possible_contours.append(contour)
-                    for point in contour['corners']:
-                        if self.is_point_near_bbox(point, bbox, pixel_threshold=6):
-                            if original_size:
-                                nodes[contour['id']]['components'].append(bboxes[i])
-                            else:
-                                nodes[contour['id']]['components'].append(bbox)
-                            break
+                        is_already_added = False
+                        for existing_comp in nodes[contour_item['id']]['components']:
+                            existing_comp_id_tuple = (
+                                existing_comp['class'],
+                                existing_comp['xmin'], existing_comp['ymin'],
+                                existing_comp['xmax'], existing_comp['ymax'],
+                                existing_comp.get('id')
+                            )
+                            if existing_comp_id_tuple == component_id_tuple:
+                                is_already_added = True
+                                break
+                        
+                        if not is_already_added:
+                            nodes[contour_item['id']]['components'].append(deepcopy(target_bbox_to_add))
+                            
+                        # Connection found for this contour and this specific component.
+                        # No need to check other points of this contour against this same component.
+                        break 
         
         if self.debug:
-            self.show_image(rects_image, "Nodes")
+            # This will show the rects_image for the last component processed, 
+            # or it needs to be moved inside the component loop to show for each.
+            # For now, keeping consistent with original placement.
+            self.show_image(rects_image, "Nodes - Contour/BBox Overlaps")
 
         # Filter out empty nodes
         valid_nodes = {node_id: node_data for node_id, node_data in nodes.items() 
@@ -911,7 +896,7 @@ class CircuitAnalyzer():
                             (cx-10, cy+10), cv2.FONT_HERSHEY_SIMPLEX, 
                             0.9, (0, 0, 255), 2)
 
-        return new_nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization
+        return new_nodes, emptied_mask, enhanced, contour_image, final_visualization
 
     
 
