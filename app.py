@@ -104,9 +104,9 @@ st.markdown("Upload your circuit diagram and analyze it step by step.")
 
 # Show SAM2 status
 if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
-    st.info("✅ SAM2 Segmentation is Enabled - Using advanced neural segmentation.")
+    st.info("✅ Model loaded successfully")
 else:
-    st.warning("⚠️ SAM2 Segmentation is Disabled - Using traditional segmentation.")
+    st.warning("⚠️ Model loading failed")
 
 # File upload section
 uploaded_file = st.file_uploader(
