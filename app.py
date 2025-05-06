@@ -5,7 +5,8 @@ import shutil
 import streamlit as st
 from src.utills import (summarize_components,
                         gemini_labels,
-                        non_max_suppression_by_confidence)
+                        non_max_suppression_by_confidence,
+                        PROMPT)
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
@@ -314,10 +315,6 @@ if uploaded_file is not None:
             with col3:
                 st.image(st.session_state.results['contour_image'], caption="3. Contours")
             
-            # Show corners image if available
-            if st.session_state.results.get('corners_image') is not None:
-                st.image(st.session_state.results['corners_image'], caption="4. Corner Detection", use_container_width=True)
-            
             # Add SAM2 debug output in a dropdown
             if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
                 with st.expander("🔍 SAM2 Debug Output"):
@@ -336,7 +333,7 @@ if uploaded_file is not None:
                 print(f"Found {len(st.session_state.results['bboxes'])} bboxes in session state")
                 try:
                     
-                    nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization = analyzer.get_node_connections(
+                    nodes, emptied_mask, enhanced, contour_image, final_visualization = analyzer.get_node_connections(
                         st.session_state.results['original_image'], 
                         st.session_state.results['bboxes']
                     )
@@ -346,7 +343,6 @@ if uploaded_file is not None:
                     st.session_state.results['node_mask'] = emptied_mask
                     st.session_state.results['enhanced_mask'] = enhanced
                     st.session_state.results['contour_image'] = contour_image
-                    st.session_state.results['corners_image'] = corners_image
                     
                     # Get SAM2 output if available
                     if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2 and hasattr(analyzer, 'last_sam2_output'):
@@ -366,9 +362,6 @@ if uploaded_file is not None:
                             st.image(enhanced, caption="2. Enhanced Mask")
                         with col3:
                             st.image(contour_image, caption="3. Contours")
-                        
-                        # Show corners image
-                        st.image(corners_image, caption="4. Corner Detection", use_container_width=True)
                 except ValueError as e:
                     print(f"SAM2 error: {str(e)}")
                     if "SAM2 segmentation failed" in str(e) or "SAM2 is disabled" in str(e):
@@ -422,6 +415,11 @@ if uploaded_file is not None:
                     st.markdown("### Final Netlist with Component Values")
                     netlist = deepcopy(valueless_netlist)
                     enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.results['original_image'], st.session_state.results['bboxes'])
+                    
+                    # Add debug dropdown to show Gemini input
+                    with st.expander("🔍 Debug Gemini Input"):
+                        st.image(enum_img, caption="Image being sent to Gemini", use_container_width=True)
+                        st.markdown(PROMPT)
                     
                     gemini_info = gemini_labels(enum_img)
                     
