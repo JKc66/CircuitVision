@@ -37,11 +37,19 @@ torch.classes.__path__ = []
 
 # Set page config and custom styles
 st.set_page_config(
-    page_title="Circuit Analyzer",
+    page_title="CircuitVision",
     page_icon="⚡",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
+# Function to load custom CSS
+def load_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+# Load custom CSS
+load_css("static/css/main.css")
 
 # Set up base paths
 BASE_DIR = Path(__file__).parent
@@ -129,21 +137,27 @@ if 'active_results' not in st.session_state:
         'corners_image': None,
         'sam2_output': None,
         'valueless_netlist_text': None, # Added for consistency
-        'enum_img': None # Added for consistency
+        'enum_img': None, # Added for consistency
+        'detailed_timings': {} # Added for detailed timings
     }
+
+if 'model_load_toast_shown' not in st.session_state:
+    st.session_state.model_load_toast_shown = False
 
 # Track previous upload to prevent unnecessary resets
 if 'previous_upload_name' not in st.session_state:
     st.session_state.previous_upload_name = None
 
 # Main content
-st.title("Circuit Diagram Analysis Tool")
-st.markdown("Upload your circuit diagram and analyze it with one click.")
+st.title("CircuitVision")
 
 # Show SAM2 status
 if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
-    st.info("✅ Model loaded successfully")
+    if not st.session_state.get('model_load_toast_shown', False):
+        st.toast("✅ Model loaded successfully")
+        st.session_state.model_load_toast_shown = True
 else:
+    # This warning is appropriate to show if the condition persists (e.g. SAM2 files missing)
     st.warning("⚠️ Model loading failed")
 
 # File upload section
@@ -184,7 +198,8 @@ if uploaded_file is not None:
             'corners_image': None,
             'sam2_output': None,
             'valueless_netlist_text': None,
-            'enum_img': None
+            'enum_img': None,
+            'detailed_timings': {} # Added for detailed timings
         }
         
         # Store original image
@@ -210,12 +225,25 @@ if uploaded_file is not None:
     
     # Add a prominent "Start Analysis" button
     if st.button("⚡ Start Analysis", use_container_width=True, type="primary"):
-        with st.spinner("Running complete circuit analysis..."):
+        
+        # Create a placeholder for the custom loader and text
+        loader_placeholder = st.empty()
+
+        with loader_placeholder.container():
+            st.markdown("""
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
+                    <div class="loader"></div>
+                    <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Running complete circuit analysis...</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
             # Start timing the analysis
-            start_time = time.time()
+            overall_start_time = time.time()
+            detailed_timings = {}
             logger.info("Starting complete circuit analysis...")
             
             # Step 1: Detect Components
+            step_start_time = time.time()
             if st.session_state.active_results['original_image'] is not None:
                 logger.debug("Step 1: Detecting components...")
                 # Get raw bounding boxes
@@ -238,8 +266,10 @@ if uploaded_file is not None:
                 component_stats = calculate_component_stats(bboxes)
                 logger.debug(f"Component statistics: {len(component_stats)} unique component types identified")
                 st.session_state.active_results['component_stats'] = component_stats
-                
+            detailed_timings['Component Detection'] = time.time() - step_start_time
+            
             # Step 2: Node Analysis
+            step_start_time = time.time()
             if st.session_state.active_results['bboxes'] is not None:
                 try:
                     logger.debug("Step 2: Analyzing node connections...")
@@ -264,8 +294,10 @@ if uploaded_file is not None:
                     error_msg = f"Error during node analysis: {str(e)}"
                     logger.error(error_msg)
                     st.error(error_msg)
+            detailed_timings['Node Analysis'] = time.time() - step_start_time
             
             # Step 3: Generate Netlist
+            step_start_time = time.time()
             if st.session_state.active_results['nodes'] is not None:
                 logger.debug("Step 3: Generating netlist...")
                 # Initial Netlist
@@ -311,13 +343,19 @@ if uploaded_file is not None:
                         logger.info(f"  - {comp_type}: {count}")
                     logger.info(f"- Total nodes: {len(st.session_state.active_results['nodes'])}")
             
+            detailed_timings['Netlist Generation'] = time.time() - step_start_time
+            
             # End timing and log the duration
-            end_time = time.time()
-            elapsed_time = end_time - start_time
+            overall_end_time = time.time()
+            elapsed_time = overall_end_time - overall_start_time
             logger.info(f"Circuit analysis completed in {elapsed_time:.2f} seconds")
             
-            # Store elapsed time in active results
+            # Store elapsed time and detailed timings in active results
             st.session_state.active_results['elapsed_time'] = elapsed_time
+            st.session_state.active_results['detailed_timings'] = detailed_timings
+
+            # Clear the custom loader and text
+            loader_placeholder.empty()
     
     # Display results section after analysis
     if st.session_state.active_results['original_image'] is not None:
@@ -326,7 +364,13 @@ if uploaded_file is not None:
         
         # Display analysis time if available
         if 'elapsed_time' in st.session_state.active_results:
-            st.success(f"✅ Analysis completed in {st.session_state.active_results['elapsed_time']:.2f} seconds")
+            if 'detailed_timings' in st.session_state.active_results and st.session_state.active_results['detailed_timings']:
+                expander_label = f"✅ Analysis completed in {st.session_state.active_results['elapsed_time']:.2f} seconds - Click to see details"
+                st.markdown("<div class='detailed-timings-expander'>", unsafe_allow_html=True)
+                with st.expander(expander_label):
+                    for step, duration in st.session_state.active_results['detailed_timings'].items():
+                        st.markdown(f"- **{step}**: {duration:.2f} seconds")
+                st.markdown("</div>", unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         
@@ -357,8 +401,8 @@ if uploaded_file is not None:
                             avg_conf = stats['total_conf'] / stats['count']
                             stats_data.append({
                                 "Component": component,
-                                "Count": stats['count'],
-                                "Avg Confidence": f"{avg_conf:.2f}"
+                                "N": stats['count'],
+                                "Avg Conf": f"{avg_conf:.2f}"
                             })
                         
                         if stats_data:
@@ -416,7 +460,7 @@ if uploaded_file is not None:
             # Show Gemini input in a dropdown
             with st.expander("🔍 Debug Gemini Input"):
                 if 'enum_img' in st.session_state.active_results:
-                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini", use_container_width=True)
+                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini", width=400)
         
         # Step 4: SPICE Analysis - keep as is
         if st.session_state.active_results.get('netlist_text') is not None:
