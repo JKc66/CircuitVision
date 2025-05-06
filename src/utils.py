@@ -42,59 +42,21 @@ components_dict = {
 
 # Gemini prompt for component analysis
 PROMPT = """
-# Circuit Component Analysis Task
-
-## Objective
-Identify the components and their values in this circuit schematic to generate an LTspice netlist. Each component has an ID in red.
-
-## Goal
-The ultimate goal is to generate a complete LTspice netlist that can be used for circuit simulation.
-
-## Input Format
-- The circuit diagram contains components with red ID numbers
-- Each ID number corresponds to the closest component
-- Use the exact ID shown in red (do not create new IDs)
-
-## Output Requirements
-- Return a **Python list of dictionaries**
-- Each dictionary should contain:
-  - `class`: Component type from the provided list
-  - `value`: Component value following LTspice conventions (use None if no value)
-  - `direction`: Direction of the component if applicable (use None if no direction)
-  - `id`: The red ID number shown in the image
-
-## Value Formatting Rules
-- Follow LTspice netlist conventions for component types:
-  - Resistors: R1, R2, etc. with values in ohms (e.g., 10k)
-  - Capacitors: C1, C2, etc. with values in farads (e.g., 1u)
-  - Inductors: L1, L2, etc. with values in henries (e.g., 10m)
-  - Voltage sources: V1, V2, etc. with values in volts (e.g., 5)
-- Use proper suffixes without units: k (kilo), M (mega), m (milli), etc.
-- No spaces between number and suffix (e.g., `22k` not `22 k`)
-- For complex values, use proper notation
-- For phasors, use magnitude:phase format (e.g., 10:30 for 10∠30°)
-
-## Direction Guidelines
-- For voltage and current sources, directionality determines polarity
-- Use only: up, down, left, right, or None
-- For components with no directionality, use None
-
-## Example Output Format
-```
-[
-  {'class': 'voltage.dependent', 'value': '35*V_2', 'direction': 'down', 'id': '1'},
-  {'class': 'voltage.ac', 'value': '22k:30', 'direction': None, 'id': '2'},
-  {'class': 'resistor', 'value': '1k', 'direction': None, 'id': '1'},
-  {'class': 'voltage.dc', 'value': '5', 'direction': 'up', 'id': '2'},
-  {'class': 'capacitor', 'value': '10u', 'direction': None, 'id': '3'},
-  {'class': 'inductor', 'value': '5m', 'direction': None, 'id': '4'},
-  {'class': 'gnd', 'value': None, 'direction': None, 'id': '5'},
-  {'class': 'voltage.ac', 'value': '10:45', 'direction': None, 'id': '6'}
-]
-```
-
-## Component Classes and Descriptions
-""" + str(components_dict)
+Identify only the components and their values in this circuit schematic, 
+the id of each component is in red. return the object as a python list of dictioaries.
+If the values are just letters or don't exist for the component, the value should be None. 
+If components are defined using complex values, write the complex/imaginary value.
+Format the output as a list of dictionaries [
+    {'class': 'voltage.dependent', 'value':'35*V_2', 'direction':'down', 'id': '1'}, 
+    {'class': 'voltage.ac', 'value':'22k:30', 'direction': 'None', 'id': '2'}
+], 
+note how you always use the same ids of the components marked in red in the image,
+to identify the component. the closest red number to a component that component's id. 
+nothing else. 
+The value of the component should not specify the unit, 
+only the suffix such as k or M or m or nothing,
+there shouldn't be a space between the number and the suffix. 
+The classes included and their descriptions: """ + str(components_dict)
 
 
 def load_classes() -> dict:
@@ -143,15 +105,15 @@ def gemini_labels(image_file):
     # Convert the image file to PIL Image format if it's a numpy array
     image_file = Image.fromarray(image_file) 
     
-    MODEL = "gemini-2.5-flash-preview-04-17"
-    # MODEL = "gemini-2.5-pro-exp-03-25"
+    # MODEL = "gemini-2.5-flash-preview-04-17"
+    MODEL = "gemini-2.5-pro-exp-03-25"
     
     # Generate content using the image and prompt
     response = client.models.generate_content(
         model=MODEL,
-        contents=[image_file, "\n\n", PROMPT],
+        contents=[image_file, "\n", PROMPT],
         config=types.GenerateContentConfig(
-            temperature=0.0
+            temperature=0
             )
     )
     print(response.text)
