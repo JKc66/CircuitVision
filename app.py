@@ -24,22 +24,56 @@ st.set_page_config(
 # Set up base paths
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'static/uploads'
-MODEL_PATH = BASE_DIR / 'models/YOLO/best_large_model_yolo.pt'
+YOLO_MODEL_PATH = BASE_DIR / 'models/YOLO/best_large_model_yolo.pt'
+# Add SAM2 paths
+SAM2_CONFIG_PATH = Path(r"D:\SDP_demo\models\configs\sam2.1_hiera_l.yaml")
+SAM2_BASE_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\sam2.1_hiera_large.pt")  # Base model
+SAM2_FINETUNED_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\best_miou_model_SAM_latest.pth")  # Fine-tuned weights
 
 # Create necessary directories
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+(BASE_DIR / 'models/SAM2').mkdir(parents=True, exist_ok=True)  # Ensure models/SAM2 exists
+
+# Check if SAM2 model files exist
+if not SAM2_CONFIG_PATH.exists() or not SAM2_BASE_CHECKPOINT_PATH.exists() or not SAM2_FINETUNED_CHECKPOINT_PATH.exists():
+    missing_files = []
+    if not SAM2_CONFIG_PATH.exists():
+        missing_files.append(f"Config: {SAM2_CONFIG_PATH}")
+    if not SAM2_BASE_CHECKPOINT_PATH.exists():
+        missing_files.append(f"Base Checkpoint: {SAM2_BASE_CHECKPOINT_PATH}")
+    if not SAM2_FINETUNED_CHECKPOINT_PATH.exists():
+        missing_files.append(f"Fine-tuned Checkpoint: {SAM2_FINETUNED_CHECKPOINT_PATH}")
+    
+    st.warning(f"One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
+    use_sam2_feature = False
+else:
+    use_sam2_feature = True
 
 # Initialize the circuit analyzer with error handling
+@st.cache_resource
 def load_circuit_analyzer():
     try:
-        analyzer = CircuitAnalyzer(yolo_path=str(MODEL_PATH), debug=False)
+        analyzer = CircuitAnalyzer(
+            yolo_path=str(YOLO_MODEL_PATH),
+            sam2_config_path=str(SAM2_CONFIG_PATH),
+            sam2_base_checkpoint_path=str(SAM2_BASE_CHECKPOINT_PATH),
+            sam2_finetuned_checkpoint_path=str(SAM2_FINETUNED_CHECKPOINT_PATH),
+            use_sam2=use_sam2_feature,
+            debug=False
+        )
         return analyzer
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 # Initialize the circuit analyzer
 analyzer = load_circuit_analyzer()
+
+# Check if analyzer loaded successfully before proceeding
+if analyzer is None:
+    st.stop()  # Stop the app if model loading failed
 
 # Create containers for results
 if 'results' not in st.session_state:
@@ -53,7 +87,9 @@ if 'results' not in st.session_state:
         'component_stats': None,
         'node_visualization': None,
         'node_mask': None,
-        'contour_image': None
+        'enhanced_mask': None,
+        'contour_image': None,
+        'corners_image': None
     }
 
 # Track previous upload to prevent unnecessary resets
@@ -63,6 +99,12 @@ if 'previous_upload_name' not in st.session_state:
 # Main content
 st.title("Circuit Diagram Analysis Tool")
 st.markdown("Upload your circuit diagram and analyze it step by step.")
+
+# Show SAM2 status
+if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
+    st.info("✅ SAM2 Segmentation is Enabled - Using advanced neural segmentation.")
+else:
+    st.warning("⚠️ SAM2 Segmentation is Disabled - Using traditional segmentation.")
 
 # File upload section
 uploaded_file = st.file_uploader(
@@ -92,7 +134,9 @@ if uploaded_file is not None:
             'component_stats': None,
             'node_visualization': None,
             'node_mask': None,
-            'contour_image': None
+            'enhanced_mask': None,
+            'contour_image': None,
+            'corners_image': None
         }
         
         # Store original image
@@ -248,13 +292,22 @@ if uploaded_file is not None:
     if st.session_state.results['node_visualization'] is not None:
         print("Showing previous node analysis results")
         with node_container:
-            st.image(st.session_state.results['node_visualization'], caption="Node Connections", use_container_width=True)
+            st.image(st.session_state.results['node_visualization'], caption="Final Node Connections", use_container_width=True)
             
-            col1, col2 = st.columns(2)
+            # Display intermediate steps
+            st.markdown("#### Intermediate Steps")
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.image(st.session_state.results['node_mask'], caption="Node Mask")
+                st.image(st.session_state.results['node_mask'], caption="1. Emptied Mask")
             with col2:
-                st.image(st.session_state.results['contour_image'], caption=f"Detected Nodes: {len(st.session_state.results['nodes'])}")
+                if st.session_state.results.get('enhanced_mask') is not None:
+                    st.image(st.session_state.results['enhanced_mask'], caption="2. Enhanced Mask")
+            with col3:
+                st.image(st.session_state.results['contour_image'], caption="3. Contours")
+            
+            # Show corners image if available
+            if st.session_state.results.get('corners_image') is not None:
+                st.image(st.session_state.results['corners_image'], caption="4. Corner Detection", use_container_width=True)
     
     if st.button("Analyze Nodes"):
         print("Analyze Nodes button clicked")
@@ -274,17 +327,26 @@ if uploaded_file is not None:
                     st.session_state.results['nodes'] = nodes
                     st.session_state.results['node_visualization'] = final_visualization
                     st.session_state.results['node_mask'] = emptied_mask
+                    st.session_state.results['enhanced_mask'] = enhanced
                     st.session_state.results['contour_image'] = contour_image
+                    st.session_state.results['corners_image'] = corners_image
                     print(f"Node analysis complete. Found {len(nodes)} nodes")
                     
                     with node_container:
-                        st.image(final_visualization, caption="Node Connections", use_container_width=True)
+                        st.image(final_visualization, caption="Final Node Connections", use_container_width=True)
                         
-                        col1, col2 = st.columns(2)
+                        # Display intermediate steps
+                        st.markdown("#### Intermediate Steps")
+                        col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.image(emptied_mask, caption="Node Mask")
+                            st.image(emptied_mask, caption="1. Emptied Mask")
                         with col2:
-                            st.image(contour_image, caption=f"Detected Nodes: {len(nodes)}")
+                            st.image(enhanced, caption="2. Enhanced Mask")
+                        with col3:
+                            st.image(contour_image, caption="3. Contours")
+                        
+                        # Show corners image
+                        st.image(corners_image, caption="4. Corner Detection", use_container_width=True)
                 except Exception as e:
                     print(f"Error during node analysis: {str(e)}")
                     st.error(f"Error during node analysis: {str(e)}")
