@@ -311,6 +311,75 @@ def non_max_suppression_by_confidence(bboxes, iou_threshold=0.5):
 
     return filtered_bboxes
 
+def create_annotated_image(image: np.ndarray, bboxes: List[Dict]) -> np.ndarray:
+    """
+    Creates an annotated image with bounding boxes and labels.
+
+    Args:
+        image (np.ndarray): The original image.
+        bboxes (List[Dict]): A list of bounding box dictionaries.
+                             Each dictionary should have 'xmin', 'ymin', 'xmax', 'ymax', 
+                             'class', and 'confidence'.
+
+    Returns:
+        np.ndarray: The annotated image.
+    """
+    annotated_image = image.copy()
+    for bbox in bboxes:
+        xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
+        xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+        label = bbox['class']
+        conf = bbox['confidence']
+        
+        # Draw rectangle
+        cv2.rectangle(annotated_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+        
+        # Add label with confidence score
+        label_text = f"{label}: {conf:.2f}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+        
+        # Draw white background for text
+        cv2.rectangle(annotated_image, 
+                    (xmin, ymin - text_height - 5),
+                    (xmin + text_width, ymin),
+                    (255, 255, 255),
+                    -1)
+        
+        # Draw text
+        cv2.putText(annotated_image, 
+                  label_text,
+                  (xmin, ymin - 5), 
+                  font,
+                  font_scale,
+                  (0, 0, 255),
+                  thickness)
+    return annotated_image
+
+def calculate_component_stats(bboxes: List[Dict]) -> Dict:
+    """
+    Calculates statistics for detected components.
+
+    Args:
+        bboxes (List[Dict]): A list of bounding box dictionaries.
+                             Each dictionary should have 'class' and 'confidence'.
+
+    Returns:
+        Dict: A dictionary where keys are component class names and values are 
+              dictionaries containing 'count' and 'total_conf'.
+    """
+    component_stats = {}
+    for bbox in bboxes:
+        name = bbox['class']
+        conf = bbox['confidence']
+        if name not in component_stats:
+            component_stats[name] = {'count': 0, 'total_conf': 0}
+        component_stats[name]['count'] += 1
+        component_stats[name]['total_conf'] += conf
+    return component_stats
+
 def parse_component_value(value: str) -> Union[float, complex]:
     """
     Extremely robust component value parser with advanced scientific notation support.
