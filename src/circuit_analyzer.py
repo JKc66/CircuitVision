@@ -1042,87 +1042,29 @@ class CircuitAnalyzer():
         return netlist
 
     def fix_netlist(self, netlist, vlm_out):
-        # Create a mapping of existing components by ID
-        netlist_by_id = {str(line.get('id', '')): line for line in netlist}
-        
-        # Track which VLM items have been processed
-        processed_vlm_items = set()
-        
-        # First, update existing components
         for line in netlist:
             for item in vlm_out:
-                if str(item['id']) == str(line.get('id', '')):
-                    # Update the value if it's None or "None"
+                if str(item['id']) == str(line['id']):
                     if line['value'] == None or line['value'] == 'None':
                         line['value'] = item['value']
 
-                    # Update the class if it's unknown or there's a mismatch
                     if line['class'] == 'unknown':
                         line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
                         line['component_num'].append(0)
                         line['component_num'] = max(line['component_num']) + 1
                         line['class'] = item['class']
-                        line['component_type'] = self.netlist_map.get(line['class'], 'UN')
+                        line['component_type'] = self.netlist_map[line['class']]
                     elif line['class'] != item['class']:
-                        if self.debug:
-                            print(f"Mismatch between VLM output and YOLO output for component {line['id']}, VLM prioritized.\n{line['class']} -> {item['class']}")
+                        print(f"Mismatch between VLM output and YOLO output for component {line['id']}, VLM prioritized.\n{line['class']} -> {item['class']}")
                         line['class'] = 'unknown'
                         line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
                         line['component_num'].append(0)
                         line['component_num'] = max(line['component_num']) + 1
                         line['class'] = item['class']
-                        line['component_type'] = self.netlist_map.get(line['class'], 'UN')
-                    
-                    processed_vlm_items.add(str(item['id']))
+                        line['component_type'] = self.netlist_map[line['class']]
                     break
-        
-        # Now add any unmatched VLM items as new components
-        component_counters = {}
-        for component_type in set(self.netlist_map.values()):
-            if component_type:
-                # Find the highest component number for this type
-                max_num = 0
-                for line in netlist:
-                    if line.get('component_type') == component_type:
-                        max_num = max(max_num, int(line.get('component_num', 0)))
-                component_counters[component_type] = max_num + 1
-        
-        # Add new items from VLM that weren't matched
-        for item in vlm_out:
-            if str(item['id']) not in processed_vlm_items:
-                # Create a new component from the VLM item
-                component_class = item.get('class', 'unknown')
-                component_type = self.netlist_map.get(component_class, 'UN')
-                
-                if not component_type:
-                    continue  # Skip components with empty type
-                
-                # Get a new component number
-                if component_type not in component_counters:
-                    component_counters[component_type] = 1
-                component_num = component_counters[component_type]
-                component_counters[component_type] += 1
-                
-                # Create new netlist entry
-                new_line = {
-                    'component_type': component_type,
-                    'component_num': component_num,
-                    'node_1': 1,  # Default node connection
-                    'node_2': 0,  # Default node connection
-                    'value': item.get('value', 'None'),
-                    'class': component_class,
-                    'id': item.get('id'),
-                    'xmin': 0,  # Default values
-                    'xmax': 0,
-                    'ymin': 0,
-                    'ymax': 0
-                }
-                
-                # Add to netlist
-                netlist.append(new_line)
-                
-                if self.debug:
-                    print(f"Added new component from VLM: {component_type}{component_num} with value {new_line['value']}")
+                else:
+                    continue
 
     def stringify_line(self, netlist_line):
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
