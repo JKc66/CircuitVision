@@ -218,7 +218,14 @@ class CircuitAnalyzer():
         img_classes = [results.names[int(num)] for num in img_classes]
         confidences = results.boxes.conf.cpu().numpy().tolist()
         boxes = results.boxes.xyxy.cpu().numpy().tolist()
-        boxes = [{'class': img_classes[i], 'confidence': confidences[i], 'xmin': round(xmin), 'ymin': round(ymin), 'xmax': round(xmax), 'ymax': round(ymax), 'id': f"{img_classes[i]}_{xmin}_{round(ymin)}_{round(xmax)}_{round(ymax)}"} for i, (xmin, ymin, xmax, ymax) in enumerate(boxes)]
+        boxes = [{'class': img_classes[i], 
+                  'confidence': confidences[i], 
+                  'xmin': round(xmin), 
+                  'ymin': round(ymin), 
+                  'xmax': round(xmax), 
+                  'ymax': round(ymax), 
+                  'persistent_uid': f"{img_classes[i]}_{round(xmin)}_{round(ymin)}_{round(xmax)}_{round(ymax)}"} 
+                 for i, (xmin, ymin, xmax, ymax) in enumerate(boxes)]
         return boxes
 
     def enhance_lines(self, image):
@@ -370,31 +377,21 @@ class CircuitAnalyzer():
         return contours, contour_img
 
     def resize_bboxes(self, bboxes, width_scale, height_scale):
-        """
-        Resizes bounding boxes using scaling factors.
-
-        Args:
-            bboxes (list): A list of bounding boxes, where each bounding box 
-                           is a tuple (xmin, ymin, xmax, ymax).
-            width_scale (float): The factor by which the width was scaled.
-            height_scale (float): The factor by which the height was scaled.
-
-        Returns:
-            list: A list of resized bounding boxes.
-        """
         resized_bboxes = []
         for bbox in bboxes:
-            xmin = bbox['xmin']
-            ymin = bbox['ymin']
-            xmax = bbox['xmax']
-            ymax = bbox['ymax']
+            resized_bbox = bbox.copy() # Start by copying all original key-value pairs
+            
+            xmin_resized = int(bbox['xmin'] * width_scale)
+            ymin_resized = int(bbox['ymin'] * height_scale)
+            xmax_resized = int(bbox['xmax'] * width_scale)
+            ymax_resized = int(bbox['ymax'] * height_scale)
 
-            xmin_resized = int(xmin * width_scale)
-            ymin_resized = int(ymin * height_scale)
-            xmax_resized = int(xmax * width_scale)
-            ymax_resized = int(ymax * height_scale)
-
-            resized_bboxes.append({'class': bbox['class'], 'xmin': xmin_resized, 'xmax': xmax_resized, 'ymin': ymin_resized, 'ymax': ymax_resized,})
+            resized_bbox['xmin'] = xmin_resized
+            resized_bbox['ymin'] = ymin_resized
+            resized_bbox['xmax'] = xmax_resized
+            resized_bbox['ymax'] = ymax_resized
+            
+            resized_bboxes.append(resized_bbox)
         return resized_bboxes
     
     def enumerate_components(self, image, bboxes = None, excluded_labels=None):
@@ -957,6 +954,11 @@ class CircuitAnalyzer():
                 component_class = component.get('class')
                 component_position = (component['xmin'], component['ymin'], component['xmax'], component['ymax'])
                 
+                if self.debug:
+                    print(f"Debug generate_netlist: Processing component for line update: {component}")
+                    if 'persistent_uid' not in component:
+                        print(f"Debug generate_netlist: persistent_uid MISSING from component dict before update: {component}")
+
                 if component_class in ['text', 'explanatory', 'junction', 'crossover', 'terminal'] or component_position in processed_components:
                     continue
                     
@@ -1022,34 +1024,90 @@ class CircuitAnalyzer():
                        'node_2': node_2,
                        'value': value}
                 line.update(component)
+                if self.debug and 'persistent_uid' not in line:
+                    print(f"Debug generate_netlist: persistent_uid MISSING from line dict AFTER update. Original component was: {component}")
                 netlist.append(line)
         
         return netlist
 
-    def fix_netlist(self, netlist, vlm_out):
-        for line in netlist:
-            for item in vlm_out:
-                if str(item['id']) == str(line['id']):
-                    if line['value'] == None or line['value'] == 'None':
-                        line['value'] = item['value']
+    def fix_netlist(self, netlist, vlm_out, all_enumerated_bboxes):
+        for line_from_gen_netlist in netlist:
+            target_persistent_uid = line_from_gen_netlist.get('persistent_uid')
+            if not target_persistent_uid:
+                if self.debug:
+                    print(f"Debug: Line in netlist missing persistent_uid: {line_from_gen_netlist}")
+                continue
 
-                    if line['class'] == 'unknown':
-                        line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
-                        line['component_num'].append(0)
-                        line['component_num'] = max(line['component_num']) + 1
-                        line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
-                    elif line['class'] != item['class']:
-                        print(f"Mismatch between VLM output and YOLO output for component {line['id']}, VLM prioritized.\n{line['class']} -> {item['class']}")
-                        line['class'] = 'unknown'
-                        line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
-                        line['component_num'].append(0)
-                        line['component_num'] = max(line['component_num']) + 1
-                        line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
+            visual_id_for_this_component = None
+            # Find the visual ID associated with this persistent_uid from all_enumerated_bboxes
+            for enum_bbox in all_enumerated_bboxes:
+                if enum_bbox.get('persistent_uid') == target_persistent_uid:
+                    visual_id_for_this_component = enum_bbox.get('id') # This 'id' is the visual enum
                     break
-                else:
-                    continue
+            
+            if visual_id_for_this_component is None:
+                if self.debug:
+                    print(f"Debug: Could not find visual_id for persistent_uid {target_persistent_uid}")
+                continue
+
+            # Now find the item in vlm_out (Gemini's output) that has this visual_id
+            for vlm_item in vlm_out:
+                if str(vlm_item.get('id')) == str(visual_id_for_this_component):
+                    # Apply updates from vlm_item to line_from_gen_netlist
+                    current_value_in_netlist_line = line_from_gen_netlist.get('value') # Initially the string "None"
+                    vlm_provided_value = vlm_item.get('value') # Value from Gemini, e.g., "2k" or Python None
+
+                    if self.debug:
+                        print(f"Debug fix_netlist: comp_uid={target_persistent_uid}, visual_id={visual_id_for_this_component}, vlm_item_id={vlm_item.get('id')}")
+                        print(f"Debug fix_netlist: current_value_in_netlist_line='{current_value_in_netlist_line}' (type: {type(current_value_in_netlist_line)})")
+                        print(f"Debug fix_netlist: vlm_provided_value='{vlm_provided_value}' (type: {type(vlm_provided_value)})")
+
+                    if current_value_in_netlist_line is None or str(current_value_in_netlist_line).strip().lower() == 'none':
+                        line_from_gen_netlist['value'] = vlm_provided_value
+                        if self.debug:
+                            print(f"Debug fix_netlist: Value UPDATED to '{line_from_gen_netlist.get('value')}' (type: {type(line_from_gen_netlist.get('value'))})")
+                    else:
+                        if self.debug:
+                            print(f"Debug fix_netlist: Value NOT updated, current_value_in_netlist_line was '{current_value_in_netlist_line}'")
+
+                    vlm_class = vlm_item.get('class')
+                    if line_from_gen_netlist.get('class') != vlm_class:
+                        if self.debug:
+                            print(f"Fixing Netlist: Component with p_uid {target_persistent_uid} (VisualID {visual_id_for_this_component}). "
+                                  f"Original YOLO class: {line_from_gen_netlist.get('class')}, "
+                                  f"VLM class: {vlm_class}")
+                        
+                        original_netlist_class = line_from_gen_netlist.get('class')
+                        line_from_gen_netlist['class'] = vlm_class
+                        line_from_gen_netlist['component_type'] = self.netlist_map.get(vlm_class, 'UN')
+                        
+                        # Recalculate component_num if the component_type prefix changes
+                        # or if the class changes significantly.
+                        # This needs to be robust. Let's assume generate_netlist_from_nodes sets initial sensible numbers.
+                        # If class changes, we might need to re-evaluate its number based on the new class.
+                        # For example, if R1 becomes C1.
+                        # The logic from previous iteration for component_num update:
+                        if self.netlist_map.get(original_netlist_class, 'UN') != self.netlist_map.get(vlm_class, 'UN') or original_netlist_class != vlm_class :
+                            new_class_component_numbers = []
+                            for l_other in netlist:
+                                if l_other.get('persistent_uid') != target_persistent_uid and l_other.get('class') == vlm_class:
+                                    num = l_other.get('component_num')
+                                    if num is not None:
+                                        try:
+                                            new_class_component_numbers.append(int(num))
+                                        except ValueError:
+                                            if self.debug:
+                                                print(f"Debug: Non-integer component_num {num} for class {vlm_class}")
+                            line_from_gen_netlist['component_num'] = max(new_class_component_numbers, default=0) + 1
+
+
+                    if vlm_class == 'gnd':
+                        line_from_gen_netlist['node_2'] = 0
+                    
+                    break # Found and processed vlm_item for this line_from_gen_netlist
+        # Potentially add a global re-numbering pass here if strict R1,R2, C1,C2 ordering is critical across all components.
 
     def stringify_line(self, netlist_line):
+        if netlist_line.get('class') == 'gnd':
+            return ""  # Ground components don't have a direct SPICE line; their nodes become '0'
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
