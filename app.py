@@ -25,7 +25,7 @@ st.set_page_config(
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'static/uploads'
 YOLO_MODEL_PATH = BASE_DIR / 'models/YOLO/best_large_model_yolo.pt'
-# Add SAM2 paths
+# Add SAM2 paths - use absolute paths for SAM2 as it requires specific path handling
 SAM2_CONFIG_PATH = Path(r"D:\SDP_demo\models\configs\sam2.1_hiera_l.yaml")
 SAM2_BASE_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\sam2.1_hiera_large.pt")  # Base model
 SAM2_FINETUNED_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\best_miou_model_SAM_latest.pth")  # Fine-tuned weights
@@ -89,7 +89,8 @@ if 'results' not in st.session_state:
         'node_mask': None,
         'enhanced_mask': None,
         'contour_image': None,
-        'corners_image': None
+        'corners_image': None,
+        'sam2_output': None
     }
 
 # Track previous upload to prevent unnecessary resets
@@ -116,6 +117,13 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     # Only reset results if a new file is uploaded
     if st.session_state.previous_upload_name != uploaded_file.name:
+        # Print a clear separator for debugging
+        print("\n")
+        print("="*80)
+        print(f"NEW IMAGE UPLOADED: {uploaded_file.name}")
+        print("="*80)
+        print("\n")
+        
         # Convert image
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
@@ -136,7 +144,8 @@ if uploaded_file is not None:
             'node_mask': None,
             'enhanced_mask': None,
             'contour_image': None,
-            'corners_image': None
+            'corners_image': None,
+            'sam2_output': None
         }
         
         # Store original image
@@ -308,6 +317,14 @@ if uploaded_file is not None:
             # Show corners image if available
             if st.session_state.results.get('corners_image') is not None:
                 st.image(st.session_state.results['corners_image'], caption="4. Corner Detection", use_container_width=True)
+            
+            # Add SAM2 debug output in a dropdown
+            if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
+                with st.expander("🔍 SAM2 Debug Output"):
+                    if st.session_state.results.get('sam2_output') is not None:
+                        st.image(st.session_state.results['sam2_output'], caption="SAM2 Segmentation Output", use_container_width=True)
+                    else:
+                        st.info("SAM2 was used but detailed output is not available. Run node analysis again to see SAM2 output.")
     
     if st.button("Analyze Nodes"):
         print("Analyze Nodes button clicked")
@@ -330,6 +347,11 @@ if uploaded_file is not None:
                     st.session_state.results['enhanced_mask'] = enhanced
                     st.session_state.results['contour_image'] = contour_image
                     st.session_state.results['corners_image'] = corners_image
+                    
+                    # Get SAM2 output if available
+                    if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2 and hasattr(analyzer, 'last_sam2_output'):
+                        st.session_state.results['sam2_output'] = analyzer.last_sam2_output
+                    
                     print(f"Node analysis complete. Found {len(nodes)} nodes")
                     
                     with node_container:
@@ -347,6 +369,16 @@ if uploaded_file is not None:
                         
                         # Show corners image
                         st.image(corners_image, caption="4. Corner Detection", use_container_width=True)
+                except ValueError as e:
+                    print(f"SAM2 error: {str(e)}")
+                    if "SAM2 segmentation failed" in str(e) or "SAM2 is disabled" in str(e):
+                        st.error(f"⚠️ {str(e)}")
+                        st.error("SAM2 is required for operation and no fallback is available.")
+                    else:
+                        st.error(f"Error during node analysis: {str(e)}")
+                    import traceback
+                    print("Full traceback:")
+                    print(traceback.format_exc())
                 except Exception as e:
                     print(f"Error during node analysis: {str(e)}")
                     st.error(f"Error during node analysis: {str(e)}")
@@ -376,6 +408,13 @@ if uploaded_file is not None:
                     # Initial Netlist
                     st.markdown("### Initial Netlist")
                     valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.results['nodes'])
+                    
+                    # Print netlist details for debugging
+                    print("===== INITIAL NETLIST DEBUGGING =====")
+                    for idx, line in enumerate(valueless_netlist):
+                        print(f"Component {idx}: {line}")
+                    print("======================================")
+                    
                     valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
                     st.code(valueless_netlist_text, language="python")
                     
@@ -385,7 +424,21 @@ if uploaded_file is not None:
                     enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.results['original_image'], st.session_state.results['bboxes'])
                     
                     gemini_info = gemini_labels(enum_img)
+                    
+                    # Print Gemini info for debugging
+                    print("===== GEMINI LABELS DEBUGGING =====")
+                    for label in gemini_info:
+                        print(f"Label {label['id']}: {label.get('class', 'unknown')}, Value: {label.get('value', 'None')}")
+                    print("===================================")
+                    
                     analyzer.fix_netlist(netlist, gemini_info)
+                    
+                    # Print final netlist for debugging
+                    print("===== FINAL NETLIST DEBUGGING =====")
+                    for idx, line in enumerate(netlist):
+                        print(f"Component {idx}: {line}")
+                    print("====================================")
+                    
                     netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
                     st.code(netlist_text, language="python")
                     

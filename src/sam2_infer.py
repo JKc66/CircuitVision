@@ -3,8 +3,11 @@ import os
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
+import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
+import warnings
+from torchvision.transforms import Normalize, Resize, ToTensor
 
 # select the device for computation
 if torch.cuda.is_available():
@@ -13,36 +16,13 @@ elif torch.backends.mps.is_available():
     device = torch.device("mps")
 else:
     device = torch.device("cpu")
-    #device = torch.device("xla")
 print(f"using device: {device}")
 
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-
-sam2_checkpoint = r"D:\SDP_demo\models\SAM2\sam2.1_hiera_large.pt"
-model_cfg = r"D:\SDP_demo\models\configs\sam2.1_hiera_l.yaml"
-
-sam2_model = build_sam2(
-    model_cfg,
-    sam2_checkpoint,
-    device=device,
-    mode="train"
-)
-sam2_model.use_high_res_features = True
-
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-import warnings
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision.transforms import Normalize, Resize, ToTensor
-
+from sam2.modeling.sam2_base import SAM2Base
+from peft import LoraConfig, get_peft_model, TaskType
+from sam2.utils.misc import get_connected_components
 
 class SAM2Transforms(nn.Module):
     def __init__(
@@ -107,8 +87,6 @@ class SAM2Transforms(nn.Module):
         """
         Perform PostProcessing on output masks.
         """
-        from sam2.utils.misc import get_connected_components
-
         masks = masks.float()
         input_masks = masks
         mask_flat = masks.flatten(0, 1).unsqueeze(1)  # flatten as 1-channel image
@@ -146,18 +124,6 @@ class SAM2Transforms(nn.Module):
 
         masks = F.interpolate(masks, orig_hw, mode="bilinear", align_corners=False)
         return masks
-    
-_transforms = SAM2Transforms(
-            resolution=sam2_model.image_size,
-            mask_threshold=0,
-            max_hole_area=0,
-            max_sprinkle_area=0,
-        )
-
-from sam2.modeling.sam2_base import SAM2Base
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
-from peft import LoraConfig, get_peft_model, TaskType # Import necessary peft components
 
 class MultiKernelRefinement(nn.Module):
     """
@@ -308,8 +274,8 @@ class SAM2ImageWrapper(nn.Module):
     
 def get_modified_sam2(
     # --- Model Config ---
-    model_cfg_path: str = r"D:\SDP_demo\models\configs\sam2.1_hiera_l.yaml",
-    checkpoint_path: str = r"D:\SDP_demo\models\SAM2\sam2.1_hiera_large.pt",
+    model_cfg_path: str,
+    checkpoint_path: str,
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu",
     use_high_res_features: bool = True,
     # --- PEFT Config ---
@@ -437,66 +403,11 @@ def get_modified_sam2(
     elif not use_peft and not use_wrapper and total_trainable > 0:
          print("Warning: Model has trainable parameters but PEFT/Wrapper were not used?")
 
-
-    print("--- Optimizer Is Ready ---")
+    print("--- Modified SAM2 Structure Ready ---")
     return final_model
 
-base_parts = ["sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
-                "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
-                "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
-                "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
-                "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
-                "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
-                "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
-                "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
-                "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
-                "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
-                "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
-                "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
-                "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
-                "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
-                "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
-                "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
-                "sam_mask_decoder.transformer.layers.0.mlp.layers.0",
-                "sam_mask_decoder.transformer.layers.0.mlp.layers.1",
-                "sam_mask_decoder.transformer.layers.1.mlp.layers.0",
-                "sam_mask_decoder.transformer.layers.1.mlp.layers.1"]
-added_parts = [
-            "sam_mask_decoder.iou_prediction_head.layers.2",
-             "sam_mask_decoder.conv_s0",
-                "sam_mask_decoder.conv_s1",
-             
-             "image_encoder.neck.convs.2.conv",
-            "image_encoder.neck.convs.3.conv", 
-             
-             "image_encoder.trunk.blocks.44.attn.qkv", # for downsampling
-              "image_encoder.trunk.blocks.44.mlp.layers.0",
-              "image_encoder.trunk.blocks.44.proj",
-
-            "image_encoder.trunk.blocks.47.attn.qkv",
-            "image_encoder.trunk.blocks.47.mlp.layers.0",
-            
-            "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
-            "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
-            "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
-            "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
-            "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
-            "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",]
-
-modified_sam2 = get_modified_sam2(
-    lora_rank = 4,
-    lora_alpha = 16,
-    weight_dice= 0.5, weight_focal=0.4, weight_iou=0.3, weight_freq=0.1,
-    use_refinement_layer = True,
-    refinement_kernels = [3, 5, 7, 11],
-    kernel_channels = 2,
-    focal_alpha=0.25,
-    lora_target_modules= base_parts + added_parts,
-    lora_dropout = 0.3,
-    lr=1e-3
-)
-
-ckp_path = r'D:\SDP_demo\models\SAM2\best_miou_model_SAM_latest.pth'
-checkpoint = torch.load(ckp_path, map_location=device, weights_only=True) 
-model_state_dict = checkpoint['state_dict'] 
-modified_sam2.load_state_dict(model_state_dict)
+# The following code has been removed:
+# 1. Module-level model loading
+# 2. Hardcoded paths
+# 3. Predefined transforms
+# The model and transforms will now be initialized in circuit_analyzer.py when needed
