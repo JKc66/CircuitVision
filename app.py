@@ -5,8 +5,9 @@ import shutil
 import streamlit as st
 from src.utils import (summarize_components,
                         gemini_labels,
-                        non_max_suppression_by_confidence,
-                        PROMPT)
+                        gemini_labels_openrouter,
+                        non_max_suppression_by_confidence
+                        )
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
@@ -419,9 +420,8 @@ if uploaded_file is not None:
                     # Add debug dropdown to show Gemini input
                     with st.expander("🔍 Debug Gemini Input"):
                         st.image(enum_img, caption="Image being sent to Gemini", use_container_width=True)
-                        st.markdown(PROMPT)
                     
-                    gemini_info = gemini_labels(enum_img)
+                    gemini_info = gemini_labels_openrouter(enum_img)
                     
                     # Print Gemini info for debugging
                     print("===== GEMINI LABELS DEBUGGING =====")
