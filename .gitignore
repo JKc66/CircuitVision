@@ -14,3 +14,4 @@ static/uploads
 *.pyzw
 
 *__pycache__/*
+progress.md

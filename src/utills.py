@@ -88,8 +88,8 @@ def gemini_labels(image_file):
     # Convert the image file to PIL Image format if it's a numpy array
     image_file = Image.fromarray(image_file) 
     
-    # MODEL = "gemini-2.5-flash-preview-04-17"
-    MODEL = "gemini-2.5-pro-exp-03-25"
+    MODEL = "gemini-2.5-flash-preview-04-17"
+    # MODEL = "gemini-2.5-pro-exp-03-25"
     
     prompt = ("Identify only the components and their values in this circuit schematic, the id of each component is in red. return the object as a python list of dictioaries."
               "If the values are just letters or don't exist for the component, the value should be None. If components are defined using complex values, write the complex/imaginary value."
@@ -107,13 +107,29 @@ def gemini_labels(image_file):
     )
     print(response.text)
     
+    # Clean up the response text
     formatted = response.text.strip('```python\n')
     formatted = formatted.strip('```json\n')
     formatted = formatted.strip('```')
-    parsed_data = ast.literal_eval(formatted)
+    
+    try:
+        import json
+        # Parse using json.loads() instead of ast.literal_eval() to handle null values properly
+        parsed_data = json.loads(formatted)
+        return parsed_data
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response: {e}")
+        print(f"Raw response: {formatted}")
+        # Fallback: Try to convert null to None for ast.literal_eval
+        try:
+            formatted = formatted.replace('null', 'None')
+            parsed_data = ast.literal_eval(formatted)
+            return parsed_data
+        except Exception as e2:
+            print(f"Fallback parsing also failed: {e2}")
+            raise ValueError(f"Failed to parse Gemini response: {e2}. Original response: {formatted}")
 #     for line in parsed_data:
 #         line['value'] = parse_value(line['value'])
-    return parsed_data
 
 def show_image(img, title="Image"):
     plt.figure(figsize=(10, 8))

@@ -20,7 +20,7 @@ import warnings
 from .sam2_infer import (
     SAM2Transforms,
     get_modified_sam2,
-    device
+    device as sam2_device
 )
 
 class CircuitAnalyzer():
@@ -36,6 +36,9 @@ class CircuitAnalyzer():
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
         self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.battery', 'voltage.dependent', 'current.dc', 'current.dependent'])
+        
+        # Add property to store last SAM2 output
+        self.last_sam2_output = None
         
         problematic = set(['__background__', 'inductor.coupled', 'operational_amplifier.schmitt_trigger', 'mechanical', 'optical', 'block', 'magnetic', 'antenna', 'relay'])
         reducing = set(['operational_amplifier.schmitt_trigger', 'integrated_circuit.ne555', 'resistor.photo', 'diode.thyrector'])
@@ -93,21 +96,104 @@ class CircuitAnalyzer():
         if self.use_sam2:
             try:
                 print("--- Initializing SAM2 ---")
-                # Import SAM2 model and transforms from sam2_infer
-                # We use the already initialized model from sam2_infer
-                from .sam2_infer import modified_sam2, _transforms, device
-                
-                self.sam2_device = device
+                self.sam2_device = sam2_device
                 print(f"Using SAM2 device: {self.sam2_device}")
                 
-                # Use the pre-initialized model
-                self.sam2_model = modified_sam2
-                self.sam2_model.eval()  # Ensure it's in evaluation mode
+                # Define LoRA target modules
+                base_parts = ["sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
+                            "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
+                            "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
+                            "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
+                            "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
+                            "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
+                            "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
+                            "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
+                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+                            "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
+                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
+                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+                            "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
+                            "sam_mask_decoder.transformer.layers.0.mlp.layers.0",
+                            "sam_mask_decoder.transformer.layers.0.mlp.layers.1",
+                            "sam_mask_decoder.transformer.layers.1.mlp.layers.0",
+                            "sam_mask_decoder.transformer.layers.1.mlp.layers.1"]
+                added_parts = [
+                        "sam_mask_decoder.iou_prediction_head.layers.2",
+                         "sam_mask_decoder.conv_s0",
+                         "sam_mask_decoder.conv_s1",
+                         
+                         "image_encoder.neck.convs.2.conv",
+                        "image_encoder.neck.convs.3.conv", 
+                         
+                         "image_encoder.trunk.blocks.44.attn.qkv", # for downsampling
+                          "image_encoder.trunk.blocks.44.mlp.layers.0",
+                          "image_encoder.trunk.blocks.44.proj",
+
+                        "image_encoder.trunk.blocks.47.attn.qkv",
+                        "image_encoder.trunk.blocks.47.mlp.layers.0",
+                        
+                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
+                        "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
+                        "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",]
                 
-                # Use the pre-initialized transforms
-                self.sam2_transforms = _transforms
+                # Build Model Structure using the provided paths
+                print(f"Building SAM2 model with config: {sam2_config_path} and base checkpoint: {sam2_base_checkpoint_path}")
+                self.sam2_model = get_modified_sam2(
+                    model_cfg_path=str(sam2_config_path),
+                    checkpoint_path=str(sam2_base_checkpoint_path),
+                    device=str(self.sam2_device),
+                    use_high_res_features=True,
+                    use_peft=True,
+                    lora_rank=4,
+                    lora_alpha=16,
+                    lora_dropout=0.3,
+                    lora_target_modules=base_parts + added_parts,
+                    use_wrapper=True,
+                    trainable_embedding_r=4,
+                    use_refinement_layer=True,
+                    refinement_kernels=[3, 5, 7, 11],
+                    kernel_channels=2,
+                    weight_dice=0.5, 
+                    weight_focal=0.4, 
+                    weight_iou=0.3, 
+                    weight_freq=0.1,
+                    focal_alpha=0.25
+                )
                 
-                print("SAM2 Model imported successfully")
+                # Load the fine-tuned weights
+                print(f"Loading SAM2 fine-tuned weights from: {sam2_finetuned_checkpoint_path}")
+                checkpoint = torch.load(str(sam2_finetuned_checkpoint_path), map_location=self.sam2_device)
+                if 'state_dict' in checkpoint:
+                    model_state_dict = checkpoint['state_dict']
+                else:
+                    model_state_dict = checkpoint
+                    
+                self.sam2_model.load_state_dict(model_state_dict)
+                self.sam2_model.eval()  # Set to evaluation mode
+                
+                # Initialize transforms
+                if hasattr(self.sam2_model, 'sam2_model') and hasattr(self.sam2_model.sam2_model, 'image_size'):
+                    resolution = self.sam2_model.sam2_model.image_size
+                elif hasattr(self.sam2_model, 'image_size'):
+                    resolution = self.sam2_model.image_size
+                else:
+                    resolution = 1024  # Default fallback
+                    print(f"Warning: Could not determine SAM2 model image size, using default: {resolution}")
+                
+                self.sam2_transforms = SAM2Transforms(
+                    resolution=resolution,
+                    mask_threshold=0,
+                    max_hole_area=0,
+                    max_sprinkle_area=0
+                )
+                
+                print("SAM2 Model loaded successfully")
                 print("--- SAM2 Ready ---")
 
             except Exception as e:
@@ -177,6 +263,7 @@ class CircuitAnalyzer():
         """
         if not self.use_sam2 or self.sam2_model is None or self.sam2_transforms is None:
             print("SAM 2 is not available or not initialized. Cannot segment.")
+            self.last_sam2_output = None
             return None
 
         print("Segmenting with SAM 2...")
@@ -204,6 +291,16 @@ class CircuitAnalyzer():
             mask_squeezed = final_mask_tensor.detach().cpu().squeeze() # Shape (H, W)
             mask_binary_np = (mask_squeezed > 0.0).numpy().astype(np.uint8) * 255 # Threshold and scale to 0/255
 
+            # Store for debugging visualization
+            self.last_sam2_output = mask_binary_np.copy()
+            
+            # Create a colored version for better visualization
+            colored_output = cv2.cvtColor(mask_binary_np, cv2.COLOR_GRAY2BGR)
+            colored_output[:,:,0] = 0  # Set blue channel to 0
+            colored_output[:,:,2] = 0  # Set red channel to 0
+            # Now the mask will be visualized in green
+            self.last_sam2_output = colored_output
+
             print("SAM 2 Segmentation successful.")
             return mask_binary_np
 
@@ -211,6 +308,7 @@ class CircuitAnalyzer():
             print(f"Error during SAM 2 segmentation: {e}")
             import traceback
             print(traceback.format_exc())
+            self.last_sam2_output = None
             return None # Return None on failure
     
     def get_contours(self, img, area_threshold=0.00040):
@@ -246,7 +344,6 @@ class CircuitAnalyzer():
                      np.random.randint(0, 255), 
                      np.random.randint(0, 255))
             cv2.drawContours(contour_img, [contour['contour']], -1, color, 2)
-
 
             font=cv2.FONT_HERSHEY_SIMPLEX
             font_scale=0.5
@@ -597,9 +694,8 @@ class CircuitAnalyzer():
             # Try SAM2 segmentation
             wire_mask = self.segment_with_sam2(image)
             if wire_mask is None:
-                print("SAM2 segmentation failed, falling back to traditional segmentation")
-                # Fallback to traditional segmentation
-                emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+                # Instead of fallback, raise an exception when SAM2 fails
+                raise ValueError("SAM2 segmentation failed and no fallback is configured")
             else:
                 # Get emptied mask from SAM2 segmentation
                 emptied_mask = wire_mask.copy()
@@ -627,8 +723,8 @@ class CircuitAnalyzer():
                 # Resize for processing
                 emptied_mask, resized_bboxes = self.resize_image_keep_aspect(emptied_mask, bboxes)
         else:
-            # Use traditional segmentation
-            emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+            # Instead of traditional segmentation, raise exception when SAM2 is disabled
+            raise ValueError("SAM2 is disabled and no fallback is configured")
         
         if self.debug:
             self.show_image(emptied_mask, 'Emptied')
@@ -641,6 +737,7 @@ class CircuitAnalyzer():
         if self.debug:
             self.show_image(contour_image, 'Contours')
             
+        # Initialize nodes dictionary with all contours
         nodes = {i['id']:{'id': i['id'], 'components': [], 'contour': i['contour']} for i in contours}
 
         harris_image = contour_image.copy()
@@ -730,6 +827,7 @@ class CircuitAnalyzer():
                             else:
                                 nodes[contour['id']]['components'].append(bbox)
                             break
+        
         if self.debug:
             self.show_image(rects_image, "Nodes")
 
@@ -944,18 +1042,27 @@ class CircuitAnalyzer():
         return netlist
 
     def fix_netlist(self, netlist, vlm_out):
+        # Create a mapping of existing components by ID
+        netlist_by_id = {str(line.get('id', '')): line for line in netlist}
+        
+        # Track which VLM items have been processed
+        processed_vlm_items = set()
+        
+        # First, update existing components
         for line in netlist:
             for item in vlm_out:
-                if str(item['id']) == str(line['id']):
+                if str(item['id']) == str(line.get('id', '')):
+                    # Update the value if it's None or "None"
                     if line['value'] == None or line['value'] == 'None':
                         line['value'] = item['value']
 
+                    # Update the class if it's unknown or there's a mismatch
                     if line['class'] == 'unknown':
                         line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
                         line['component_num'].append(0)
                         line['component_num'] = max(line['component_num']) + 1
                         line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
+                        line['component_type'] = self.netlist_map.get(line['class'], 'UN')
                     elif line['class'] != item['class']:
                         if self.debug:
                             print(f"Mismatch between VLM output and YOLO output for component {line['id']}, VLM prioritized.\n{line['class']} -> {item['class']}")
@@ -964,11 +1071,58 @@ class CircuitAnalyzer():
                         line['component_num'].append(0)
                         line['component_num'] = max(line['component_num']) + 1
                         line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
+                        line['component_type'] = self.netlist_map.get(line['class'], 'UN')
+                    
+                    processed_vlm_items.add(str(item['id']))
                     break
-                else:
-                    continue
-    
-    
+        
+        # Now add any unmatched VLM items as new components
+        component_counters = {}
+        for component_type in set(self.netlist_map.values()):
+            if component_type:
+                # Find the highest component number for this type
+                max_num = 0
+                for line in netlist:
+                    if line.get('component_type') == component_type:
+                        max_num = max(max_num, int(line.get('component_num', 0)))
+                component_counters[component_type] = max_num + 1
+        
+        # Add new items from VLM that weren't matched
+        for item in vlm_out:
+            if str(item['id']) not in processed_vlm_items:
+                # Create a new component from the VLM item
+                component_class = item.get('class', 'unknown')
+                component_type = self.netlist_map.get(component_class, 'UN')
+                
+                if not component_type:
+                    continue  # Skip components with empty type
+                
+                # Get a new component number
+                if component_type not in component_counters:
+                    component_counters[component_type] = 1
+                component_num = component_counters[component_type]
+                component_counters[component_type] += 1
+                
+                # Create new netlist entry
+                new_line = {
+                    'component_type': component_type,
+                    'component_num': component_num,
+                    'node_1': 1,  # Default node connection
+                    'node_2': 0,  # Default node connection
+                    'value': item.get('value', 'None'),
+                    'class': component_class,
+                    'id': item.get('id'),
+                    'xmin': 0,  # Default values
+                    'xmax': 0,
+                    'ymin': 0,
+                    'ymax': 0
+                }
+                
+                # Add to netlist
+                netlist.append(new_line)
+                
+                if self.debug:
+                    print(f"Added new component from VLM: {component_type}{component_num} with value {new_line['value']}")
+
     def stringify_line(self, netlist_line):
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
