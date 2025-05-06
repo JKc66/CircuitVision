@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import shutil
 import streamlit as st
-from src.utills import (summarize_components,
+from src.utils import (summarize_components,
                         gemini_labels,
                         non_max_suppression_by_confidence,
                         PROMPT)

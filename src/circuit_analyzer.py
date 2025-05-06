@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
-from .utills import (
+from .utils import (
     load_classes,
-    non_max_suppression_by_area,
+    non_max_suppression_by_area
 )
 
 # +++ SAM 2 Imports +++
