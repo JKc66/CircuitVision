@@ -1,6 +1,6 @@
 streamlit
 numpy
-opencv-python-headless
+opencv-python
 Pillow
 PySpice
 google-genai
@@ -9,3 +9,7 @@ torch
 torchvision
 python-dotenv
 scikit-learn
+git+https://github.com/facebookresearch/sam2.git
+peft
+requests
+gdown
