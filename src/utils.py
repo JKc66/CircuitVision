@@ -19,8 +19,11 @@ from PIL import Image
 from scipy.ndimage import zoom
 import ast
 import re
-from typing import Union, Dict
+from typing import Union, Dict, List
 import streamlit as st
+import openai
+import base64
+import io
 
 
 # Load environment variables from .env file
@@ -40,6 +43,23 @@ components_dict = {
     'diode': 'Diode: has the direction of the symbol which is like an arrow (up, down, left or right)'
 }
 
+# Gemini prompt for component analysis
+PROMPT = """
+Identify only the components and their values in this circuit schematic, 
+the id of each component is in red. return the object as a python list of dictioaries.
+If the values are just letters or don't exist for the component, the value should be None. 
+If components are defined using complex values, write the complex/imaginary value.
+Format the output as a list of dictionaries [
+    {'class': 'voltage.dependent', 'value':'35*V_2', 'direction':'down', 'id': '1'}, 
+    {'class': 'voltage.ac', 'value':'22k:30', 'direction': 'None', 'id': '2'}
+], 
+note how you always use the same ids of the components marked in red in the image,
+to identify the component. the closest red number to a component that component's id. 
+nothing else. 
+The value of the component should not specify the unit, 
+only the suffix such as k or M or m or nothing,
+there shouldn't be a space between the number and the suffix. 
+The classes included and their descriptions: """ + str(components_dict)
 
 
 def load_classes() -> dict:
@@ -77,11 +97,10 @@ def gemini_labels(image_file):
         dict: A dictionary with component names as keys and a list of their
               values as entries.
     """
-    # Load API key from Streamlit secrets
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        raise ValueError("GEMINI_API_KEY not found in Streamlit secrets")
+    api_key = os.getenv("GEMINI_API_KEY")
+    
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in environment variables. Please set it in your .env file.")
         
     client = genai.Client(api_key=api_key)
     
@@ -91,31 +110,128 @@ def gemini_labels(image_file):
     # MODEL = "gemini-2.5-flash-preview-04-17"
     MODEL = "gemini-2.5-pro-exp-03-25"
     
-    prompt = ("Identify only the components and their values in this circuit schematic, the id of each component is in red. return the object as a python list of dictioaries."
-              "If the values are just letters or don't exist for the component, the value should be None. If components are defined using complex values, write the complex/imaginary value."
-              "Format the output as a list of dictionaries [{'class': 'voltage.dependent', 'value':'35*V_2', 'direction':'down', 'id': '1'}, "
-              "{'class': 'voltage.ac', 'value':'22k:30', 'direction': 'None', 'id': '2'}], note how you always use the same ids of the components marked in red in the image, to identify the component. the closest red number to a component that component's id. nothing else. The value of the component should not specify the unit, only the suffix such as k or M or m or nothing, there shouldn't be a space between the number and the suffix. The classes included and their descriptions: " 
-              + str(components_dict))
-    
     # Generate content using the image and prompt
     response = client.models.generate_content(
         model=MODEL,
-        contents=[image_file, "\n\n", prompt],
+        contents=[image_file, "\n", PROMPT],
         config=types.GenerateContentConfig(
-            temperature=0.0
+            temperature=0
             )
     )
     print(response.text)
     
+    # Clean up the response text
     formatted = response.text.strip('```python\n')
     formatted = formatted.strip('```json\n')
     formatted = formatted.strip('```')
-    parsed_data = ast.literal_eval(formatted)
+    
+    try:
+        import json
+        # Parse using json.loads() instead of ast.literal_eval() to handle null values properly
+        parsed_data = json.loads(formatted)
+        return parsed_data
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response: {e}")
+        print(f"Raw response: {formatted}")
+        # Fallback: Try to convert null to None for ast.literal_eval
+        try:
+            formatted = formatted.replace('null', 'None')
+            parsed_data = ast.literal_eval(formatted)
+            return parsed_data
+        except Exception as e2:
+            print(f"Fallback parsing also failed: {e2}")
+            raise ValueError(f"Failed to parse Gemini response: {e2}. Original response: {formatted}")
 #     for line in parsed_data:
 #         line['value'] = parse_value(line['value'])
-    return parsed_data
 
+def gemini_labels_openrouter(image_file):
+    """
+    Uploads an image of a circuit schematic to OpenRouter (using OpenAI SDK)
+    to analyze components with a Gemini model, retrieves the components and
+    their values, and returns them in a structured format.
 
+    Args:
+        image_file (np.ndarray): Image array of the circuit schematic.
+
+    Returns:
+        dict: A dictionary with component names as keys and a list of their
+              values as entries.
+    """
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    
+    if not openrouter_api_key:
+        raise ValueError("OPENROUTER_API_KEY not found in environment variables. Please set it in your .env file.")
+        
+    client = openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_api_key,
+        default_headers={
+            "HTTP-Referer": "http://circuit-analyzer",
+            "X-Title": "Circuit Analyzer"
+        }
+    )
+    
+    # Convert numpy array to PIL Image
+    pil_image = Image.fromarray(image_file)
+
+    # Convert PIL Image to base64
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="PNG")
+    base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    
+    # Using OpenRouter's model
+    OPENROUTER_MODEL = "google/gemini-2.5-pro-preview"
+    
+    try:
+        response = client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=0,
+        )
+        
+        if not response.choices or len(response.choices) == 0:
+            raise ValueError("OpenRouter API response did not contain any choices.")
+        
+        response_text = response.choices[0].message.content
+        print(response_text)
+        
+        # Clean up the response text
+        formatted = response_text.strip('```python\n')
+        formatted = formatted.strip('```json\n')
+        formatted = formatted.strip('```')
+        
+        try:
+            import json
+            # Parse using json.loads() instead of ast.literal_eval() to handle null values properly
+            parsed_data = json.loads(formatted)
+            return parsed_data
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON response: {e}")
+            print(f"Raw response: {formatted}")
+            # Fallback: Try to convert null to None for ast.literal_eval
+            try:
+                formatted = formatted.replace('null', 'None')
+                parsed_data = ast.literal_eval(formatted)
+                return parsed_data
+            except Exception as e2:
+                print(f"Fallback parsing also failed: {e2}")
+                raise ValueError(f"Failed to parse OpenRouter response: {e2}. Original response: {formatted}")
+    except openai.APIError as e:
+        print(f"OpenRouter API Error with model {OPENROUTER_MODEL}: {e}")
+        raise ValueError(f"OpenRouter API request failed: {str(e)}")
 
 def show_image(img, title="Image"):
     plt.figure(figsize=(10, 8))
@@ -192,6 +308,75 @@ def non_max_suppression_by_confidence(bboxes, iou_threshold=0.5):
                   if calculate_iou(bbox1, bbox2) < iou_threshold]
 
     return filtered_bboxes
+
+def create_annotated_image(image: np.ndarray, bboxes: List[Dict]) -> np.ndarray:
+    """
+    Creates an annotated image with bounding boxes and labels.
+
+    Args:
+        image (np.ndarray): The original image.
+        bboxes (List[Dict]): A list of bounding box dictionaries.
+                             Each dictionary should have 'xmin', 'ymin', 'xmax', 'ymax', 
+                             'class', and 'confidence'.
+
+    Returns:
+        np.ndarray: The annotated image.
+    """
+    annotated_image = image.copy()
+    for bbox in bboxes:
+        xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
+        xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+        label = bbox['class']
+        conf = bbox['confidence']
+        
+        # Draw rectangle
+        cv2.rectangle(annotated_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+        
+        # Add label with confidence score
+        label_text = f"{label}: {conf:.2f}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+        
+        # Draw white background for text
+        cv2.rectangle(annotated_image, 
+                    (xmin, ymin - text_height - 5),
+                    (xmin + text_width, ymin),
+                    (255, 255, 255),
+                    -1)
+        
+        # Draw text
+        cv2.putText(annotated_image, 
+                  label_text,
+                  (xmin, ymin - 5), 
+                  font,
+                  font_scale,
+                  (0, 0, 255),
+                  thickness)
+    return annotated_image
+
+def calculate_component_stats(bboxes: List[Dict]) -> Dict:
+    """
+    Calculates statistics for detected components.
+
+    Args:
+        bboxes (List[Dict]): A list of bounding box dictionaries.
+                             Each dictionary should have 'class' and 'confidence'.
+
+    Returns:
+        Dict: A dictionary where keys are component class names and values are 
+              dictionaries containing 'count' and 'total_conf'.
+    """
+    component_stats = {}
+    for bbox in bboxes:
+        name = bbox['class']
+        conf = bbox['confidence']
+        if name not in component_stats:
+            component_stats[name] = {'count': 0, 'total_conf': 0}
+        component_stats[name]['count'] += 1
+        component_stats[name]['total_conf'] += conf
+    return component_stats
 
 def parse_component_value(value: str) -> Union[float, complex]:
     """

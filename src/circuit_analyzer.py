@@ -5,19 +5,40 @@ import cv2
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
-from .utills import (
+from .utils import (
     load_classes,
-    non_max_suppression_by_area,
+    non_max_suppression_by_area
+)
+
+# +++ SAM 2 Imports +++
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+import warnings
+# Import SAM2 components from sam2_infer
+from .sam2_infer import (
+    SAM2Transforms,
+    get_modified_sam2,
+    device as sam2_device
 )
 
 class CircuitAnalyzer():
-    def __init__(self, yolo_path='/kaggle/input/circuit/best_large.pt', debug=False):
+    def __init__(self, yolo_path='D:/SDP_demo/models/YOLO/best_large_model_yolo.pt', 
+                 sam2_config_path='D:/SDP_demo/models/configs/sam2.1_hiera_l.yaml',
+                 sam2_base_checkpoint_path='D:/SDP_demo/models/SAM2/sam2.1_hiera_large.pt',
+                 sam2_finetuned_checkpoint_path='D:/SDP_demo/models/SAM2/best_miou_model_SAM_latest.pth',
+                 use_sam2=True,
+                 debug=False):
         self.yolo = YOLO(yolo_path)
         self.debug = debug
         self.classes = load_classes()
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
         self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.battery', 'voltage.dependent', 'current.dc', 'current.dependent'])
+        
+        # Add property to store last SAM2 output
+        self.last_sam2_output = None
         
         problematic = set(['__background__', 'inductor.coupled', 'operational_amplifier.schmitt_trigger', 'mechanical', 'optical', 'block', 'magnetic', 'antenna', 'relay'])
         reducing = set(['operational_amplifier.schmitt_trigger', 'integrated_circuit.ne555', 'resistor.photo', 'diode.thyrector'])
@@ -46,9 +67,9 @@ class CircuitAnalyzer():
             'voltage.ac': 'V',
             'voltage.dc': 'V',
             'voltage.battery': 'V',
-            'voltage.dependent': 'E', # Added dependent voltage source
-            'current.dc': 'I',        # Added DC current source
-            'current.dependent': 'G', # Added dependent current source
+            'voltage.dependent': 'E',
+            'current.dc': 'I',
+            'current.dependent': 'G',
             'vss': 'GND',
             'gnd': '0',
             'switch': 'S',
@@ -57,7 +78,7 @@ class CircuitAnalyzer():
             'operational_amplifier': 'X',
             'thyristor': 'Q',
             'transformer': 'T',
-            'varistor': 'RV',  # Note: potential conflict with voltage sources. Consider using 'RV'
+            'varistor': 'RV',
             'terminal': 'N',
             'junction': '',
             'crossover': '',
@@ -66,6 +87,130 @@ class CircuitAnalyzer():
             'unknown': 'UN',
         }
         
+        # +++ SAM2 Initialization +++
+        self.use_sam2 = use_sam2
+        self.sam2_model = None
+        self.sam2_transforms = None
+        self.sam2_device = None
+
+        if self.use_sam2:
+            try:
+                print("--- Initializing SAM2 ---")
+                self.sam2_device = sam2_device
+                print(f"Using SAM2 device: {self.sam2_device}")
+                
+                # Define LoRA target modules
+                base_parts = [
+                    "sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
+                    "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
+                    "sam_mask_decoder.transformer.layers.0.mlp.layers.0",
+                    "sam_mask_decoder.transformer.layers.0.mlp.layers.1",
+                    "sam_mask_decoder.transformer.layers.1.mlp.layers.0",
+                    "sam_mask_decoder.transformer.layers.1.mlp.layers.1"
+                    ]
+                added_parts = [
+                    "sam_mask_decoder.iou_prediction_head.layers.2",
+                    "sam_mask_decoder.conv_s0",
+                    "sam_mask_decoder.conv_s1",
+                        
+                    "image_encoder.neck.convs.2.conv",
+                    "image_encoder.neck.convs.3.conv", 
+                        
+                    "image_encoder.trunk.blocks.44.attn.qkv", # for downsampling
+                    "image_encoder.trunk.blocks.44.mlp.layers.0",
+                    "image_encoder.trunk.blocks.44.proj",
+
+                    "image_encoder.trunk.blocks.47.attn.qkv",
+                    "image_encoder.trunk.blocks.47.mlp.layers.0",
+                    
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
+                    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
+                    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
+                    ]
+                
+                # Build Model Structure using the provided paths
+                print(f"Building SAM2 model with config: {sam2_config_path} and base checkpoint: {sam2_base_checkpoint_path}")
+                self.sam2_model = get_modified_sam2(
+                    model_cfg_path=str(sam2_config_path),
+                    checkpoint_path=str(sam2_base_checkpoint_path),
+                    device=str(self.sam2_device),
+                    use_high_res_features=True,
+                    use_peft=True,
+                    lora_rank=4,
+                    lora_alpha=16,
+                    lora_dropout=0.3,
+                    lora_target_modules=base_parts + added_parts,
+                    use_wrapper=True,
+                    trainable_embedding_r=4,
+                    use_refinement_layer=True,
+                    refinement_kernels=[3, 5, 7, 11],
+                    kernel_channels=2,
+                    weight_dice=0.5, 
+                    weight_focal=0.4, 
+                    weight_iou=0.3, 
+                    weight_freq=0.1,
+                    focal_alpha=0.25
+                )
+                
+                # Load the fine-tuned weights
+                print(f"Loading SAM2 fine-tuned weights from: {sam2_finetuned_checkpoint_path}")
+                checkpoint = torch.load(str(sam2_finetuned_checkpoint_path), map_location=self.sam2_device)
+                if 'state_dict' in checkpoint:
+                    model_state_dict = checkpoint['state_dict']
+                else:
+                    model_state_dict = checkpoint
+                    
+                self.sam2_model.load_state_dict(model_state_dict)
+                self.sam2_model.eval()  # Set to evaluation mode
+                
+                # Initialize transforms
+                if hasattr(self.sam2_model, 'sam2_model') and hasattr(self.sam2_model.sam2_model, 'image_size'):
+                    resolution = self.sam2_model.sam2_model.image_size
+                elif hasattr(self.sam2_model, 'image_size'):
+                    resolution = self.sam2_model.image_size
+                else:
+                    resolution = 1024  # Default fallback
+                    print(f"Warning: Could not determine SAM2 model image size, using default: {resolution}")
+                
+                self.sam2_transforms = SAM2Transforms(
+                    resolution=resolution,
+                    mask_threshold=0,
+                    max_hole_area=0,
+                    max_sprinkle_area=0
+                )
+                
+                print("SAM2 Model loaded successfully")
+                print("--- SAM2 Ready ---")
+
+            except Exception as e:
+                print(f"An unexpected error occurred during SAM2 initialization: {e}")
+                import traceback
+                print(traceback.format_exc())
+                print("SAM2 will be disabled.")
+                self.use_sam2 = False
+                self.sam2_model = None
+                self.sam2_transforms = None
+                self.sam2_device = None
+        else:
+            print("SAM2 usage is disabled in configuration.")
+        
     def bboxes(self, image):
         results = self.yolo.predict(image, verbose=True)
         results = results[0]
@@ -73,7 +218,14 @@ class CircuitAnalyzer():
         img_classes = [results.names[int(num)] for num in img_classes]
         confidences = results.boxes.conf.cpu().numpy().tolist()
         boxes = results.boxes.xyxy.cpu().numpy().tolist()
-        boxes = [{'class': img_classes[i], 'confidence': confidences[i], 'xmin': round(xmin), 'ymin': round(ymin), 'xmax': round(xmax), 'ymax': round(ymax), 'id': f"{img_classes[i]}_{xmin}_{round(ymin)}_{round(xmax)}_{round(ymax)}"} for i, (xmin, ymin, xmax, ymax) in enumerate(boxes)]
+        boxes = [{'class': img_classes[i], 
+                  'confidence': confidences[i], 
+                  'xmin': round(xmin), 
+                  'ymin': round(ymin), 
+                  'xmax': round(xmax), 
+                  'ymax': round(ymax), 
+                  'persistent_uid': f"{img_classes[i]}_{round(xmin)}_{round(ymin)}_{round(xmax)}_{round(ymax)}"} 
+                 for i, (xmin, ymin, xmax, ymax) in enumerate(boxes)]
         return boxes
 
     def enhance_lines(self, image):
@@ -107,6 +259,67 @@ class CircuitAnalyzer():
         # applying adaptive threshold
         img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 21)
         return img
+    
+    def segment_with_sam2(self, image_np_bgr):
+        """
+        Segments the circuit diagram using the loaded SAM 2 model.
+
+        Args:
+            image_np_bgr (np.ndarray): Input image in BGR format (from cv2.imread).
+
+        Returns:
+            np.ndarray: Binary mask (uint8, 0 or 255) where 255 represents wires/connections,
+                        at the original image resolution. Returns None if SAM 2 is not available or fails.
+        """
+        if not self.use_sam2 or self.sam2_model is None or self.sam2_transforms is None:
+            print("SAM 2 is not available or not initialized. Cannot segment.")
+            self.last_sam2_output = None
+            return None
+
+        print("Segmenting with SAM 2...")
+        try:
+            # 1. Prepare Input Image
+            image_np_rgb = cv2.cvtColor(image_np_bgr, cv2.COLOR_BGR2RGB)
+            image_pil = Image.fromarray(image_np_rgb)
+            orig_hw = image_np_rgb.shape[:2]
+
+            # 2. Preprocess
+            image_tensor = self.sam2_transforms(image_pil).unsqueeze(0).to(self.sam2_device)
+
+            # 3. Inference
+            self.sam2_model.eval() # Ensure evaluation mode
+            with torch.no_grad():
+                # Use the SAM2 model from sam2_infer
+                high_res_mask, low_res_mask, _ = self.sam2_model(image_tensor)
+                # Choose high_res mask for better detail
+                chosen_mask = high_res_mask
+
+            # 4. Postprocess
+            final_mask_tensor = self.sam2_transforms.postprocess_masks(chosen_mask, orig_hw) # Shape (1, 1, H, W)
+
+            # 5. Convert to Binary NumPy Mask
+            mask_squeezed = final_mask_tensor.detach().cpu().squeeze() # Shape (H, W)
+            mask_binary_np = (mask_squeezed > 0.0).numpy().astype(np.uint8) * 255 # Threshold and scale to 0/255
+
+            # Store for debugging visualization
+            self.last_sam2_output = mask_binary_np.copy()
+            
+            # Create a colored version for better visualization
+            colored_output = cv2.cvtColor(mask_binary_np, cv2.COLOR_GRAY2BGR)
+            colored_output[:,:,0] = 0  # Set blue channel to 0
+            colored_output[:,:,2] = 0  # Set red channel to 0
+            # Now the mask will be visualized in green
+            self.last_sam2_output = colored_output
+
+            print("SAM 2 Segmentation successful.")
+            return mask_binary_np
+
+        except Exception as e:
+            print(f"Error during SAM 2 segmentation: {e}")
+            import traceback
+            print(traceback.format_exc())
+            self.last_sam2_output = None
+            return None # Return None on failure
     
     def get_contours(self, img, area_threshold=0.00040):
         """
@@ -142,7 +355,6 @@ class CircuitAnalyzer():
                      np.random.randint(0, 255))
             cv2.drawContours(contour_img, [contour['contour']], -1, color, 2)
 
-
             font=cv2.FONT_HERSHEY_SIMPLEX
             font_scale=0.5
             color=(255, 0, 0) 
@@ -165,31 +377,21 @@ class CircuitAnalyzer():
         return contours, contour_img
 
     def resize_bboxes(self, bboxes, width_scale, height_scale):
-        """
-        Resizes bounding boxes using scaling factors.
-
-        Args:
-            bboxes (list): A list of bounding boxes, where each bounding box 
-                           is a tuple (xmin, ymin, xmax, ymax).
-            width_scale (float): The factor by which the width was scaled.
-            height_scale (float): The factor by which the height was scaled.
-
-        Returns:
-            list: A list of resized bounding boxes.
-        """
         resized_bboxes = []
         for bbox in bboxes:
-            xmin = bbox['xmin']
-            ymin = bbox['ymin']
-            xmax = bbox['xmax']
-            ymax = bbox['ymax']
+            resized_bbox = bbox.copy() # Start by copying all original key-value pairs
+            
+            xmin_resized = int(bbox['xmin'] * width_scale)
+            ymin_resized = int(bbox['ymin'] * height_scale)
+            xmax_resized = int(bbox['xmax'] * width_scale)
+            ymax_resized = int(bbox['ymax'] * height_scale)
 
-            xmin_resized = int(xmin * width_scale)
-            ymin_resized = int(ymin * height_scale)
-            xmax_resized = int(xmax * width_scale)
-            ymax_resized = int(ymax * height_scale)
-
-            resized_bboxes.append({'class': bbox['class'], 'xmin': xmin_resized, 'xmax': xmax_resized, 'ymin': ymin_resized, 'ymax': ymax_resized,})
+            resized_bbox['xmin'] = xmin_resized
+            resized_bbox['ymin'] = ymin_resized
+            resized_bbox['xmax'] = xmax_resized
+            resized_bbox['ymax'] = ymax_resized
+            
+            resized_bboxes.append(resized_bbox)
         return resized_bboxes
     
     def enumerate_components(self, image, bboxes = None, excluded_labels=None):
@@ -486,106 +688,130 @@ class CircuitAnalyzer():
     def get_node_connections(self, image, bboxes, original_size=False):
         original = image.copy()
         image = image.copy()
-        emptied_mask, resized_bboxes = self.resize_image_keep_aspect(self.get_emptied_mask(image, bboxes), bboxes)
+        
+        # --- Segmentation ---
+        if self.use_sam2:
+            # Try SAM2 segmentation
+            wire_mask = self.segment_with_sam2(image)
+            if wire_mask is None:
+                # Instead of fallback, raise an exception when SAM2 fails
+                raise ValueError("SAM2 segmentation failed and no fallback is configured")
+            else:
+                # Get emptied mask from SAM2 segmentation
+                emptied_mask = wire_mask.copy()
+                height, width = emptied_mask.shape[:2]
+                
+                # Empty out component areas
+                for bbox in bboxes:
+                    if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
+                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
+                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
+                        if ymin < ymax and xmin < xmax:
+                            emptied_mask[ymin:ymax, xmin:xmax] = 0
+                
+                # Apply circuit bbox if present
+                for bbox in bboxes:
+                    if bbox['class'] == 'circuit':
+                        new_mask = np.zeros_like(emptied_mask)
+                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
+                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
+                        if ymin < ymax and xmin < xmax:
+                            new_mask[ymin:ymax, xmin:xmax] = emptied_mask[ymin:ymax, xmin:xmax]
+                        emptied_mask = new_mask
+                        break
+                
+                # Resize for processing
+                emptied_mask, resized_bboxes = self.resize_image_keep_aspect(emptied_mask, bboxes)
+        else:
+            # Instead of traditional segmentation, raise exception when SAM2 is disabled
+            raise ValueError("SAM2 is disabled and no fallback is configured")
+        
         if self.debug:
             self.show_image(emptied_mask, 'Emptied')
+            
         enhanced = self.enhance_lines(emptied_mask)
         if self.debug:
             self.show_image(enhanced, 'Enhanced')
+            
         contours, contour_image = self.get_contours(enhanced)
         if self.debug:
             self.show_image(contour_image, 'Contours')
+            
+        # Initialize nodes dictionary with all contours
         nodes = {i['id']:{'id': i['id'], 'components': [], 'contour': i['contour']} for i in contours}
 
-        harris_image = contour_image.copy()
-        for contour in contours:
-            # Convert the contour to a grayscale image (for Harris corner detection)
-            mask = np.zeros_like(enhanced, dtype=np.uint8)
-            cv2.drawContours(mask, [contour['contour']], -1, (255, 255, 255), -1)
-            normalizer = mask.shape[0] * mask.shape[1]
-            # Harris corner detection
-            gray = mask
-            gray = 255 - gray
-            gray = np.float32(gray)
-            dst = cv2.cornerHarris(gray, blockSize=3, ksize=3, k=0.015)
-            dst = cv2.dilate(dst, None)  # Dilate to mark corners stronger
-            # Threshold for corner detection
-            corners = dst > 0.1 * dst.max()
-            corner_points = np.argwhere(corners)
-            thresh = 0.1 * dst.max()
-            y, x = np.where(dst > thresh)
-            coordinates = np.float32(np.stack((x, y), axis=-1))
+        # Loop through components to find connections
+        # Initialize rects_image for debug visualization of component-contour overlaps
+        # This image will show the contours and then bounding boxes of components being checked.
+        # If self.debug is true, it's shown at the end of this loop.
+        # We make a fresh copy from contour_image as it's a good base.
+        # Note: Previously rects_image was based on corners_image.
+        rects_image = contour_image.copy()
 
-            if self.debug:
-                for i in range(len(x)):
-                    cv2.circle(harris_image, (x[i], y[i]), 3, (0, 255, 0), -1)  # Red circles, filled
-            
-            # Skip clustering if no corners were detected
-            if len(coordinates) == 0:
-                print(f"Warning: No corners detected for contour {contour['id']}")
-                contour['corners'] = np.array([])
+        for i, bbox_comp in enumerate(resized_bboxes):
+            if bbox_comp['class'] in self.non_components:
                 continue
+            
+            # For debugging, can re-initialize rects_image per component if needed
+            # rects_image = contour_image.copy() 
+            xmin_comp, ymin_comp = int(bbox_comp['xmin']), int(bbox_comp['ymin'])
+            xmax_comp, ymax_comp = int(bbox_comp['xmax']), int(bbox_comp['ymax'])
+    
+            for contour_item in contours: # Iterate over each contour (potential wire)
+                # Bounding box of the current contour
+                c_xmin_contour, c_ymin_contour, c_width_contour, c_height_contour = contour_item['rectangle']
+                c_xmax_contour = c_xmin_contour + c_width_contour
+                c_ymax_contour = c_ymin_contour + c_height_contour
                 
-            scaler = StandardScaler()
-            coordinates_scaled = scaler.fit_transform(coordinates)
-            dbscan = DBSCAN(eps=0.07, min_samples=3)
-            labels = dbscan.fit_predict(coordinates_scaled)
-            unique_labels = set(labels)
-            centers = []
-            for label in unique_labels:
-                if label != -1:  # Ignore noise points (-1)
-                    cluster_points = coordinates[labels == label]
-                    center = np.mean(cluster_points, axis=0)
-                    centers.append(center)
-            centers = np.array(centers)
-            
-            # If no valid clusters were found, use the original corner points
-            if len(centers) == 0:
-                print(f"Warning: No valid clusters found for contour {contour['id']}, using original corners")
-                # Use a subset of original corners to avoid too many points
-                step = max(1, len(coordinates) // 10)  # Take at most 10 corners
-                centers = coordinates[::step]
-            
-            contour['corners'] = centers
-            
-        if self.debug:
-            self.show_image(harris_image, 'Harris Corners')
-        corners_image = contour_image.copy()   
-        # Draw circles at cluster centers
-        for contour in contours:
-            for center in contour['corners']:
-                cv2.circle(corners_image, (int(center[0]), int(center[1])), 3, (0, 0, 255), -1)
-        if self.debug:
-            self.show_image(corners_image, 'Corners')
+                # Draw contour rectangle (for debugging visualization)
+                cv2.rectangle(rects_image, (c_xmin_contour, c_ymin_contour), (c_xmax_contour, c_ymax_contour), color=(0, 255, 0), thickness=1) 
+    
+                # Broad phase: Check if component's bbox and contour's bbox overlap
+                if xmax_comp < c_xmin_contour or xmin_comp > c_xmax_contour or ymax_comp < c_ymin_contour or ymin_comp > c_ymax_contour:
+                    continue # No overlap between bounding boxes, so this contour cannot connect to this component
+                
+                # Narrow phase: Iterate through each point of the actual contour
+                # contour_item['contour'] is a NumPy array of points (e.g., [[[x1,y1]], [[x2,y2]], ...])
+                for point_array in contour_item['contour']:
+                    point = tuple(point_array[0]) # Extract (x,y) from [[x,y]]
+                    
+                    if self.is_point_near_bbox(point, bbox_comp, pixel_threshold=6):
+                        # A point on the contour is near the component's bbox
+                        target_bbox_to_add = bboxes[i] if original_size else bbox_comp
+                        
+                        # Check if this component is already associated with this node to avoid duplicates.
+                        # Construct a unique identifier for the component.
+                        component_id_tuple = (
+                            target_bbox_to_add['class'], 
+                            target_bbox_to_add['xmin'], target_bbox_to_add['ymin'],
+                            target_bbox_to_add['xmax'], target_bbox_to_add['ymax'],
+                            target_bbox_to_add.get('id') # Include 'id' if present (e.g., from enumerate_components)
+                        )
 
-        for i, bbox in enumerate(resized_bboxes):
-            if bbox['class'] in self.non_components:
-                continue
-            possible_contours = []
-            rects_image = corners_image.copy()
-            xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
-            xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
-    
-            for contour in contours:
-                c_xmin = contour['rectangle'][0]
-                c_ymin = contour['rectangle'][1]
-                c_xmax = c_xmin + contour['rectangle'][2]
-                c_ymax = c_ymin + contour['rectangle'][3]
-                cv2.rectangle(rects_image, (c_xmin, c_ymin), (c_xmax, c_ymax), color=(0, 255, 0), thickness=1)
-    
-                if ymax < c_ymin or ymin > c_ymax or xmax < c_xmin or xmin > c_xmax:
-                    continue
-                else:
-                    possible_contours.append(contour)
-                    for point in contour['corners']:
-                        if self.is_point_near_bbox(point, bbox, pixel_threshold=6):
-                            if original_size:
-                                nodes[contour['id']]['components'].append(bboxes[i])
-                            else:
-                                nodes[contour['id']]['components'].append(bbox)
-                            break
+                        is_already_added = False
+                        for existing_comp in nodes[contour_item['id']]['components']:
+                            existing_comp_id_tuple = (
+                                existing_comp['class'],
+                                existing_comp['xmin'], existing_comp['ymin'],
+                                existing_comp['xmax'], existing_comp['ymax'],
+                                existing_comp.get('id')
+                            )
+                            if existing_comp_id_tuple == component_id_tuple:
+                                is_already_added = True
+                                break
+                        
+                        if not is_already_added:
+                            nodes[contour_item['id']]['components'].append(deepcopy(target_bbox_to_add))
+                            
+                        # Connection found for this contour and this specific component.
+                        # No need to check other points of this contour against this same component.
+                        break 
+        
         if self.debug:
-            self.show_image(rects_image, "Nodes")
+            # This will show the rects_image for the last component processed, 
+            # or it needs to be moved inside the component loop to show for each.
+            # For now, keeping consistent with original placement.
+            self.show_image(rects_image, "Nodes - Contour/BBox Overlaps")
 
         # Filter out empty nodes
         valid_nodes = {node_id: node_data for node_id, node_data in nodes.items() 
@@ -667,7 +893,7 @@ class CircuitAnalyzer():
                             (cx-10, cy+10), cv2.FONT_HERSHEY_SIMPLEX, 
                             0.9, (0, 0, 255), 2)
 
-        return new_nodes, emptied_mask, enhanced, contour_image, corners_image, final_visualization
+        return new_nodes, emptied_mask, enhanced, contour_image, final_visualization
 
     
 
@@ -728,6 +954,11 @@ class CircuitAnalyzer():
                 component_class = component.get('class')
                 component_position = (component['xmin'], component['ymin'], component['xmax'], component['ymax'])
                 
+                if self.debug:
+                    print(f"Debug generate_netlist: Processing component for line update: {component}")
+                    if 'persistent_uid' not in component:
+                        print(f"Debug generate_netlist: persistent_uid MISSING from component dict before update: {component}")
+
                 if component_class in ['text', 'explanatory', 'junction', 'crossover', 'terminal'] or component_position in processed_components:
                     continue
                     
@@ -793,36 +1024,90 @@ class CircuitAnalyzer():
                        'node_2': node_2,
                        'value': value}
                 line.update(component)
+                if self.debug and 'persistent_uid' not in line:
+                    print(f"Debug generate_netlist: persistent_uid MISSING from line dict AFTER update. Original component was: {component}")
                 netlist.append(line)
         
         return netlist
 
-    def fix_netlist(self, netlist, vlm_out):
-        for line in netlist:
-            for item in vlm_out:
-                if str(item['id']) == str(line['id']):
-                    if line['value'] == None or line['value'] == 'None':
-                        line['value'] = item['value']
+    def fix_netlist(self, netlist, vlm_out, all_enumerated_bboxes):
+        for line_from_gen_netlist in netlist:
+            target_persistent_uid = line_from_gen_netlist.get('persistent_uid')
+            if not target_persistent_uid:
+                if self.debug:
+                    print(f"Debug: Line in netlist missing persistent_uid: {line_from_gen_netlist}")
+                continue
 
-                    if line['class'] == 'unknown':
-                        line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
-                        line['component_num'].append(0)
-                        line['component_num'] = max(line['component_num']) + 1
-                        line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
-                    elif line['class'] != item['class']:
-                        if self.debug:
-                            print(f"Mismatch between VLM output and YOLO output for component {line['id']}, VLM prioritized.\n{line['class']} -> {item['class']}")
-                        line['class'] = 'unknown'
-                        line['component_num'] = [int(l.get("component_num", 0)) for l in netlist if l['class'] == item['class']]
-                        line['component_num'].append(0)
-                        line['component_num'] = max(line['component_num']) + 1
-                        line['class'] = item['class']
-                        line['component_type'] = self.netlist_map[line['class']]
+            visual_id_for_this_component = None
+            # Find the visual ID associated with this persistent_uid from all_enumerated_bboxes
+            for enum_bbox in all_enumerated_bboxes:
+                if enum_bbox.get('persistent_uid') == target_persistent_uid:
+                    visual_id_for_this_component = enum_bbox.get('id') # This 'id' is the visual enum
                     break
-                else:
-                    continue
-    
-    
+            
+            if visual_id_for_this_component is None:
+                if self.debug:
+                    print(f"Debug: Could not find visual_id for persistent_uid {target_persistent_uid}")
+                continue
+
+            # Now find the item in vlm_out (Gemini's output) that has this visual_id
+            for vlm_item in vlm_out:
+                if str(vlm_item.get('id')) == str(visual_id_for_this_component):
+                    # Apply updates from vlm_item to line_from_gen_netlist
+                    current_value_in_netlist_line = line_from_gen_netlist.get('value') # Initially the string "None"
+                    vlm_provided_value = vlm_item.get('value') # Value from Gemini, e.g., "2k" or Python None
+
+                    if self.debug:
+                        print(f"Debug fix_netlist: comp_uid={target_persistent_uid}, visual_id={visual_id_for_this_component}, vlm_item_id={vlm_item.get('id')}")
+                        print(f"Debug fix_netlist: current_value_in_netlist_line='{current_value_in_netlist_line}' (type: {type(current_value_in_netlist_line)})")
+                        print(f"Debug fix_netlist: vlm_provided_value='{vlm_provided_value}' (type: {type(vlm_provided_value)})")
+
+                    if current_value_in_netlist_line is None or str(current_value_in_netlist_line).strip().lower() == 'none':
+                        line_from_gen_netlist['value'] = vlm_provided_value
+                        if self.debug:
+                            print(f"Debug fix_netlist: Value UPDATED to '{line_from_gen_netlist.get('value')}' (type: {type(line_from_gen_netlist.get('value'))})")
+                    else:
+                        if self.debug:
+                            print(f"Debug fix_netlist: Value NOT updated, current_value_in_netlist_line was '{current_value_in_netlist_line}'")
+
+                    vlm_class = vlm_item.get('class')
+                    if line_from_gen_netlist.get('class') != vlm_class:
+                        if self.debug:
+                            print(f"Fixing Netlist: Component with p_uid {target_persistent_uid} (VisualID {visual_id_for_this_component}). "
+                                  f"Original YOLO class: {line_from_gen_netlist.get('class')}, "
+                                  f"VLM class: {vlm_class}")
+                        
+                        original_netlist_class = line_from_gen_netlist.get('class')
+                        line_from_gen_netlist['class'] = vlm_class
+                        line_from_gen_netlist['component_type'] = self.netlist_map.get(vlm_class, 'UN')
+                        
+                        # Recalculate component_num if the component_type prefix changes
+                        # or if the class changes significantly.
+                        # This needs to be robust. Let's assume generate_netlist_from_nodes sets initial sensible numbers.
+                        # If class changes, we might need to re-evaluate its number based on the new class.
+                        # For example, if R1 becomes C1.
+                        # The logic from previous iteration for component_num update:
+                        if self.netlist_map.get(original_netlist_class, 'UN') != self.netlist_map.get(vlm_class, 'UN') or original_netlist_class != vlm_class :
+                            new_class_component_numbers = []
+                            for l_other in netlist:
+                                if l_other.get('persistent_uid') != target_persistent_uid and l_other.get('class') == vlm_class:
+                                    num = l_other.get('component_num')
+                                    if num is not None:
+                                        try:
+                                            new_class_component_numbers.append(int(num))
+                                        except ValueError:
+                                            if self.debug:
+                                                print(f"Debug: Non-integer component_num {num} for class {vlm_class}")
+                            line_from_gen_netlist['component_num'] = max(new_class_component_numbers, default=0) + 1
+
+
+                    if vlm_class == 'gnd':
+                        line_from_gen_netlist['node_2'] = 0
+                    
+                    break # Found and processed vlm_item for this line_from_gen_netlist
+        # Potentially add a global re-numbering pass here if strict R1,R2, C1,C2 ordering is critical across all components.
+
     def stringify_line(self, netlist_line):
+        if netlist_line.get('class') == 'gnd':
+            return ""  # Ground components don't have a direct SPICE line; their nodes become '0'
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
