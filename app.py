@@ -6,6 +6,8 @@ import streamlit as st
 import logging
 import os
 import time
+from PIL import Image, ImageOps
+from PIL.ExifTags import TAGS
 from src.utils import (summarize_components,
                         gemini_labels,
                         gemini_labels_openrouter,
@@ -41,36 +43,73 @@ st.set_page_config(
     page_icon="⚡",
     layout="centered",
     initial_sidebar_state="collapsed",
+    menu_items={
+        'About': "AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly."
+    }
 )
-
-# Add custom HTML head elements for better social media previews
-st.markdown("""
-    <head>
-        <!-- Primary Meta Tags -->
-        <title>CircuitVision</title>
-        <meta name="description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
-
-        <!-- Facebook Meta Tags -->
-        <meta property="og:url" content="https://app.jawadk.me/circuits/">
-        <meta property="og:type" content="website">
-        <meta property="og:title" content="CircuitVision">
-        <meta property="og:description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
-        <meta property="og:image" content="https://opengraph.b-cdn.net/production/images/762a2284-6adb-4b5f-96b6-7ce3cf615404.jpg?token=uKkwQNRxnUzq5h9_YYmLCkz6v_vL4f48uRXla77bKcI&height=901&width=1200&expires=33282582202">
-
-        <!-- Twitter Meta Tags -->
-        <meta name="twitter:card" content="summary_large_image">
-        <meta property="twitter:domain" content="app.jawadk.me">
-        <meta property="twitter:url" content="https://app.jawadk.me/circuits/">
-        <meta name="twitter:title" content="CircuitVision">
-        <meta name="twitter:description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
-        <meta name="twitter:image" content="https://opengraph.b-cdn.net/production/images/762a2284-6adb-4b5f-96b6-7ce3cf615404.jpg?token=uKkwQNRxnUzq5h9_YYmLCkz6v_vL4f48uRXla77bKcI&height=901&width=1200&expires=33282582202">
-    </head>
-""", unsafe_allow_html=True)
 
 # Function to load custom CSS
 def load_css(file_name):
     with open(file_name) as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+# Function to auto-rotate image based on EXIF orientation tag
+def auto_rotate_image(image_path):
+    try:
+        image = Image.open(image_path)
+        exif = image._getexif()
+        
+        # If there's no EXIF data or no orientation tag, return the original image
+        if not exif or 0x0112 not in exif:  # 0x0112 is the orientation tag ID
+            return image
+        
+        orientation = exif[0x0112]
+        logger.info(f"Auto-rotating image with orientation tag: {orientation}")
+        
+        # Apply rotation based on orientation
+        rotated_image = ImageOps.exif_transpose(image)
+        return rotated_image
+    except Exception as e:
+        logger.error(f"Error auto-rotating image: {str(e)}")
+        return Image.open(image_path)  # Return original on error
+
+# Function to format EXIF data for better display
+def format_value(value):
+    """Format values for display, handling binary data appropriately"""
+    if isinstance(value, bytes):
+        return f"[Binary data, {len(value)} bytes]"
+    elif isinstance(value, str):
+        cleaned = ''.join(c for c in value if c.isprintable())
+        return cleaned if cleaned else "[Empty string]"
+    return value
+
+def format_exif_data(image_path):
+    try:
+        img = Image.open(image_path)
+        
+        # Define important tags we want to show
+        important_tags = {
+            'Software',
+            'Orientation'
+        }
+        
+        # Get EXIF data
+        exif_data = {}
+        try:
+            exif = img._getexif()
+            if exif:
+                for tag_id, value in exif.items():
+                    tag = TAGS.get(tag_id, tag_id)
+                    if tag in important_tags:
+                        exif_data[tag] = format_value(value)
+        except Exception as e:
+            logger.warning(f"Error getting EXIF with _getexif(): {e}")
+            
+        return exif_data if exif_data else None
+        
+    except Exception as e:
+        logger.error(f"Error formatting EXIF data: {str(e)}")
+        return None
 
 # Load custom CSS
 load_css("static/css/main.css")
@@ -113,8 +152,8 @@ if not os.path.exists(SAM2_CONFIG_PATH_OBJ) or not os.path.exists(SAM2_BASE_CHEC
     if not os.path.exists(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ):
         missing_files.append(f"Fine-tuned Checkpoint: {SAM2_FINETUNED_CHECKPOINT_PATH}")
     
-    logger.warning(f"One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
-    st.warning(f"One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
+    logger.warning("One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
+    st.warning("One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
     use_sam2_feature = False
 else:
     logger.info("All SAM2 model files found and will be used")
@@ -186,6 +225,8 @@ if 'previous_upload_name' not in st.session_state:
 # Track analysis state
 if 'analysis_in_progress' not in st.session_state:
     st.session_state.analysis_in_progress = False
+if 'start_analysis_triggered' not in st.session_state:
+    st.session_state.start_analysis_triggered = False
 
 # Main content
 st.title("CircuitVision")
@@ -207,6 +248,9 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
+    # Generate a consistent image path for the uploaded file
+    image_path = os.path.join(UPLOAD_DIR, f'1.{uploaded_file.name.split(".")[-1]}')
+    
     # Only reset results if a new file is uploaded
     if st.session_state.previous_upload_name != uploaded_file.name:
         # Log a clear separator for debugging
@@ -238,7 +282,8 @@ if uploaded_file is not None:
             'sam2_output': None,
             'valueless_netlist_text': None,
             'enum_img': None,
-            'detailed_timings': {} # Added for detailed timings
+            'detailed_timings': {}, # Added for detailed timings
+            'image_path': image_path  # Store the image path in session state
         }
         
         # Store original image
@@ -248,9 +293,34 @@ if uploaded_file is not None:
         if os.path.exists(UPLOAD_DIR):
             shutil.rmtree(UPLOAD_DIR)
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-        image_path = os.path.join(UPLOAD_DIR, f'1.{uploaded_file.name.split(".")[-1]}')
-        save_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # Convert back to BGR for saving
-        cv2.imwrite(str(image_path), save_image)
+        
+        # Save using PIL to preserve EXIF data
+        pil_image = Image.open(uploaded_file)
+            
+        # Auto-rotate the image based on EXIF orientation tag
+        logger.info(f"Checking EXIF orientation for {uploaded_file.name}")
+        try:
+            exif = pil_image._getexif()
+            if exif and 0x0112 in exif:  # 0x0112 is the orientation tag ID
+                orientation = exif[0x0112]
+                logger.info(f"Found orientation tag: {orientation}")
+                if orientation != 1:  # If orientation is not normal
+                    logger.info(f"Auto-rotating image with orientation {orientation}")
+                    pil_image = ImageOps.exif_transpose(pil_image)
+                    # Update the numpy array image as well
+                    image = np.array(pil_image)
+                    st.session_state.active_results['original_image'] = image
+        except Exception as e:
+            logger.error(f"Error checking/rotating image based on EXIF: {str(e)}")
+        
+        # Save the processed image, preserving EXIF data
+        exif_bytes = pil_image.info.get('exif')
+        if exif_bytes:
+            pil_image.save(image_path, format=pil_image.format, exif=exif_bytes)
+            logger.info(f"Saved image {image_path} with EXIF data ({len(exif_bytes)} bytes).")
+        else:
+            pil_image.save(image_path, format=pil_image.format)
+            logger.info(f"Saved image {image_path} without EXIF data (EXIF not found in PIL image after processing).")
         
         # Update previous upload name
         st.session_state.previous_upload_name = uploaded_file.name
@@ -264,143 +334,204 @@ if uploaded_file is not None:
     
     # Add a prominent "Start Analysis" button
     if st.button("⚡ Start Analysis", use_container_width=True, type="primary", disabled=st.session_state.analysis_in_progress):
-        
-        # Set analysis in progress
-        st.session_state.analysis_in_progress = True
-        
-        # Create a placeholder for the custom loader and text
-        loader_placeholder = st.empty()
+        if not st.session_state.analysis_in_progress: # Safety check
+            st.session_state.start_analysis_triggered = True
+            st.session_state.analysis_in_progress = True # Set this to True to disable button on rerun
+            st.rerun() # Force immediate rerun to show button as disabled
 
-        with loader_placeholder.container():
-            st.markdown("""
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
-                    <div class="loader"></div>
-                    <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Running complete circuit analysis...</p>
-                </div>
-            """, unsafe_allow_html=True)
+    # Analysis logic, executed if triggered
+    if st.session_state.get('start_analysis_triggered', False):
+        st.session_state.start_analysis_triggered = False # Consume the trigger
+        try:
+            # analysis_in_progress is already True. 
             
-            # Start timing the analysis
-            overall_start_time = time.time()
-            detailed_timings = {}
-            logger.info("Starting complete circuit analysis...")
-            
-            # Step 1: Detect Components
-            step_start_time = time.time()
-            if st.session_state.active_results['original_image'] is not None:
-                logger.debug("Step 1: Detecting components...")
-                # Get raw bounding boxes
-                raw_bboxes = analyzer.bboxes(st.session_state.active_results['original_image'])
-                logger.debug(f"Detected {len(raw_bboxes)} raw bounding boxes")
+            # Create a placeholder for the custom loader and text
+            loader_placeholder = st.empty()
+
+            with loader_placeholder.container():
+                st.markdown("""
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
+                        <div class="loader"></div>
+                        <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Running complete circuit analysis...</p>
+                    </div>
+                """, unsafe_allow_html=True)
                 
-                # Apply Non-Maximum Suppression
-                bboxes = non_max_suppression_by_confidence(raw_bboxes, iou_threshold=0.6)
-                logger.debug(f"After NMS: {len(bboxes)} bounding boxes")
-                st.session_state.active_results['bboxes'] = bboxes
+                # Start timing the analysis
+                overall_start_time = time.time()
+                detailed_timings = {}
+                logger.info("Starting complete circuit analysis...")
                 
-                # Create annotated image using the utility function
-                annotated_image = create_annotated_image(
-                    st.session_state.active_results['original_image'], 
-                    bboxes
-                )
-                st.session_state.active_results['annotated_image'] = annotated_image
-                
-                # Parse and display component counts using the utility function
-                component_stats = calculate_component_stats(bboxes)
-                logger.debug(f"Component statistics: {len(component_stats)} unique component types identified")
-                st.session_state.active_results['component_stats'] = component_stats
-            detailed_timings['Component Detection'] = time.time() - step_start_time
-            
-            # Step 2: Node Analysis
-            step_start_time = time.time()
-            if st.session_state.active_results['bboxes'] is not None:
-                try:
-                    logger.debug("Step 2: Analyzing node connections...")
-                    nodes, emptied_mask, enhanced, contour_image, final_visualization = analyzer.get_node_connections(
+                # Step 1: Detect Components
+                step_start_time = time.time()
+                if st.session_state.active_results['original_image'] is not None:
+                    logger.debug("Step 1: Detecting components...")
+                    # Get raw bounding boxes
+                    raw_bboxes = analyzer.bboxes(st.session_state.active_results['original_image'])
+                    logger.debug(f"Detected {len(raw_bboxes)} raw bounding boxes")
+                    
+                    # Apply Non-Maximum Suppression
+                    bboxes = non_max_suppression_by_confidence(raw_bboxes, iou_threshold=0.6)
+                    logger.debug(f"After NMS: {len(bboxes)} bounding boxes")
+                    st.session_state.active_results['bboxes'] = bboxes
+                    
+                    # Create annotated image using the utility function
+                    annotated_image = create_annotated_image(
                         st.session_state.active_results['original_image'], 
-                        st.session_state.active_results['bboxes']
+                        bboxes
                     )
+                    st.session_state.active_results['annotated_image'] = annotated_image
                     
-                    logger.debug(f"Node analysis completed: {len(nodes)} nodes identified")
-                    st.session_state.active_results['nodes'] = nodes
-                    st.session_state.active_results['node_visualization'] = final_visualization
-                    st.session_state.active_results['node_mask'] = emptied_mask
-                    st.session_state.active_results['enhanced_mask'] = enhanced
-                    st.session_state.active_results['contour_image'] = contour_image
+                    # Parse and display component counts using the utility function
+                    component_stats = calculate_component_stats(bboxes)
+                    logger.debug(f"Component statistics: {len(component_stats)} unique component types identified")
+                    st.session_state.active_results['component_stats'] = component_stats
+                else:
+                    logger.error("No image found in session state")
+                    raise ValueError("No image found. Please upload an image and try again.")
+                detailed_timings['Component Detection'] = time.time() - step_start_time
+                
+                # Step 2: Node Analysis
+                step_start_time = time.time()
+                if st.session_state.active_results['bboxes'] is not None:
+                    try:
+                        logger.debug("Step 2: Analyzing node connections...")
+                        nodes, emptied_mask, enhanced, contour_image, final_visualization = analyzer.get_node_connections(
+                            st.session_state.active_results['original_image'], 
+                            st.session_state.active_results['bboxes']
+                        )
+                        
+                        logger.debug(f"Node analysis completed: {len(nodes)} nodes identified")
+                        st.session_state.active_results['nodes'] = nodes
+                        st.session_state.active_results['node_visualization'] = final_visualization
+                        st.session_state.active_results['node_mask'] = emptied_mask
+                        st.session_state.active_results['enhanced_mask'] = enhanced
+                        st.session_state.active_results['contour_image'] = contour_image
+                        
+                        # Get SAM2 output if available
+                        if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2 and hasattr(analyzer, 'last_sam2_output'):
+                            logger.debug("SAM2 output available and stored")
+                            st.session_state.active_results['sam2_output'] = analyzer.last_sam2_output
+                            
+                    except Exception as e:
+                        error_msg = f"Error during node analysis: {str(e)}"
+                        logger.error(error_msg)
+                        st.error(error_msg)
+                        # Don't stop execution on node analysis error, but mark in log
+                        logger.warning("Continuing execution despite node analysis error")
+                else:
+                    logger.error("No bounding boxes found for node analysis")
+                    st.error("No components were detected. Please try a different image with clearer circuit elements.")
+                detailed_timings['Node Analysis'] = time.time() - step_start_time
+                
+                # Step 3: Generate Netlist
+                step_start_time = time.time()
+                if st.session_state.active_results['nodes'] is not None:
+                    try:
+                        logger.debug("Step 3: Generating netlist...")
+                        # Initial Netlist
+                        valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.active_results['nodes'])
+                        valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
+                        logger.debug(f"Generated initial netlist with {len(valueless_netlist)} components")
+                        
+                        # Final Netlist
+                        netlist = deepcopy(valueless_netlist)
+                        logger.debug("Enumerating components for Gemini labeling...")
+                        enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.active_results['original_image'], st.session_state.active_results['bboxes'])
+                        logger.debug("Calling Gemini for component labeling...")
+                        
+                        # Wrap Gemini call in try/except to handle API failures gracefully
+                        try:
+                            gemini_info = gemini_labels_openrouter(enum_img)
+                            logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
+                            analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
+                        except Exception as gemini_error:
+                            logger.error(f"Error calling Gemini API: {str(gemini_error)}")
+                            st.warning(f"Could not get component values from AI: {str(gemini_error)}. Using basic netlist.")
+                            # Still use the valueless netlist
+                            netlist = valueless_netlist
+                        
+                        # Debug: Log the state of netlist lines before stringifying
+                        if logger.isEnabledFor(logging.DEBUG):
+                            for i, ln_debug in enumerate(netlist):
+                                logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
+                                
+                        netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
+                        logger.debug("Final netlist generation complete")
+                        
+                        st.session_state.active_results['netlist'] = netlist
+                        st.session_state.active_results['netlist_text'] = netlist_text
+                        st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
+                        st.session_state.active_results['enum_img'] = enum_img
+                    except Exception as netlist_error:
+                        error_msg = f"Error generating netlist: {str(netlist_error)}"
+                        logger.error(error_msg)
+                        st.error(error_msg)
+                else:
+                    logger.warning("No nodes found for netlist generation")
+                    st.warning("Could not identify connection nodes in the circuit. The netlist may be incomplete.")
                     
-                    # Get SAM2 output if available
-                    if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2 and hasattr(analyzer, 'last_sam2_output'):
-                        logger.debug("SAM2 output available and stored")
-                        st.session_state.active_results['sam2_output'] = analyzer.last_sam2_output
-                        
-                except Exception as e:
-                    error_msg = f"Error during node analysis: {str(e)}"
-                    logger.error(error_msg)
-                    st.error(error_msg)
-            detailed_timings['Node Analysis'] = time.time() - step_start_time
-            
-            # Step 3: Generate Netlist
-            step_start_time = time.time()
-            if st.session_state.active_results['nodes'] is not None:
-                logger.debug("Step 3: Generating netlist...")
-                # Initial Netlist
-                valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.active_results['nodes'])
-                valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
-                logger.debug(f"Generated initial netlist with {len(valueless_netlist)} components")
+                    # Still try to generate a basic netlist from bboxes if available
+                    if st.session_state.active_results['bboxes'] is not None:
+                        try:
+                            logger.debug("Attempting to generate basic netlist from components only...")
+                            # Create empty nodes if needed
+                            empty_nodes = []
+                            valueless_netlist = analyzer.generate_netlist_from_nodes(empty_nodes)
+                            st.session_state.active_results['netlist'] = valueless_netlist
+                            st.session_state.active_results['netlist_text'] = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
+                        except Exception as fallback_error:
+                            logger.error(f"Error generating fallback netlist: {str(fallback_error)}")
                 
-                # Final Netlist
-                netlist = deepcopy(valueless_netlist)
-                logger.debug("Enumerating components for Gemini labeling...")
-                enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.active_results['original_image'], st.session_state.active_results['bboxes'])
-                logger.debug("Calling Gemini for component labeling...")
-                gemini_info = gemini_labels_openrouter(enum_img)
-                logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
-                analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
-                
-                # Debug: Log the state of netlist lines before stringifying
-                if logger.isEnabledFor(logging.DEBUG):
-                    for i, ln_debug in enumerate(netlist):
-                        logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
-                        
-                netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
-                logger.debug("Final netlist generation complete")
-                
-                st.session_state.active_results['netlist'] = netlist
-                st.session_state.active_results['netlist_text'] = netlist_text
-                st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
-                st.session_state.active_results['enum_img'] = enum_img
+                detailed_timings['Netlist Generation'] = time.time() - step_start_time
                 
                 # Log analysis summary
-                if log_level in ['DEBUG', 'INFO']:
-                    component_counts = {}
-                    for line in netlist:
-                        comp_type = line['class']
-                        if comp_type not in component_counts:
-                            component_counts[comp_type] = 0
-                        component_counts[comp_type] += 1
-                    
-                    logger.info("Analysis results summary:")
-                    logger.info(f"- Image: {st.session_state.active_results.get('uploaded_file_name', 'Unknown')}")
-                    logger.info(f"- Total components detected: {len(netlist)}")
-                    for comp_type, count in component_counts.items():
-                        logger.info(f"  - {comp_type}: {count}")
-                    logger.info(f"- Total nodes: {len(st.session_state.active_results['nodes'])}")
-            
-            detailed_timings['Netlist Generation'] = time.time() - step_start_time
-            
-            # End timing and log the duration
-            overall_end_time = time.time()
-            elapsed_time = overall_end_time - overall_start_time
-            logger.info(f"Circuit analysis completed in {elapsed_time:.2f} seconds")
-            
-            # Store elapsed time and detailed timings in active results
-            st.session_state.active_results['elapsed_time'] = elapsed_time
-            st.session_state.active_results['detailed_timings'] = detailed_timings
+                if st.session_state.active_results.get('netlist') and log_level in ['DEBUG', 'INFO']:
+                    try:
+                        component_counts = {}
+                        for line in st.session_state.active_results['netlist']:
+                            comp_type = line['class']
+                            if comp_type not in component_counts:
+                                component_counts[comp_type] = 0
+                            component_counts[comp_type] += 1
+                        
+                        logger.info("Analysis results summary:")
+                        logger.info(f"- Image: {st.session_state.active_results.get('uploaded_file_name', 'Unknown')}")
+                        logger.info(f"- Total components detected: {len(st.session_state.active_results['netlist'])}")
+                        for comp_type, count in component_counts.items():
+                            logger.info(f"  - {comp_type}: {count}")
+                        if st.session_state.active_results.get('nodes'):
+                            logger.info(f"- Total nodes: {len(st.session_state.active_results['nodes'])}")
+                    except Exception as summary_error:
+                        logger.error(f"Error generating analysis summary: {str(summary_error)}")
+                
+                # End timing and log the duration
+                overall_end_time = time.time()
+                elapsed_time = overall_end_time - overall_start_time
+                logger.info(f"Circuit analysis completed in {elapsed_time:.2f} seconds")
+                
+                # Store elapsed time and detailed timings in active results
+                st.session_state.active_results['elapsed_time'] = elapsed_time
+                st.session_state.active_results['detailed_timings'] = detailed_timings
 
-            # Clear the custom loader and text
-            loader_placeholder.empty()
+                # Clear the custom loader and text
+                loader_placeholder.empty()
+                
+        except Exception as e:
+            error_msg = f"Error during analysis: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            st.error(error_msg)
             
-            # Reset analysis in progress
+            # Clear the loader if it exists
+            try:
+                loader_placeholder.empty()
+            except:
+                pass
+        finally:
+            # Always reset analysis state when done, even if there was an error
             st.session_state.analysis_in_progress = False
+            st.rerun() # Ensures UI update after analysis completion or error
     
     # Display results section after analysis
     if st.session_state.active_results['original_image'] is not None:
@@ -425,12 +556,45 @@ if uploaded_file is not None:
             
             # Show image details as a dropdown
             with st.expander("Image Details"):
+                # Basic image properties that are always available
+                img = Image.open(image_path)
                 h, w = st.session_state.active_results['original_image'].shape[:2]
+                st.markdown("### Basic Properties")
                 st.markdown(f"- **Size**: {w}x{h} pixels")
-                if 'uploaded_file_type' in st.session_state.active_results:
-                    st.markdown(f"- **Format**: {st.session_state.active_results['uploaded_file_type']}")
+                st.markdown(f"- **Format**: {img.format}")
+                st.markdown(f"- **Mode**: {img.mode}")
                 if 'uploaded_file_name' in st.session_state.active_results:
                     st.markdown(f"- **Name**: {st.session_state.active_results['uploaded_file_name']}")
+                
+                # EXIF data section
+                st.markdown("### EXIF Data")
+                try:
+                    exif = format_exif_data(image_path)
+                    if exif:
+                        # Show important EXIF data in a clean table format
+                        table_rows = ["| Tag | Value |", "| --- | --- |"]
+                        
+                        # Add all important tags to the table
+                        for tag, value in sorted(exif.items()):
+                            # Escape pipe characters for markdown tables
+                            if isinstance(value, str):
+                                value = value.replace('|', '\\|')
+                            if isinstance(tag, str):
+                                tag = tag.replace('|', '\\|')
+                                
+                            table_rows.append(f"| {tag} | {value} |")
+                            
+                        if len(table_rows) > 2:
+                            st.markdown("\n".join(table_rows))
+                        else:
+                            st.info("No important EXIF tags found in this image.")
+                    else:
+                        st.info("ℹ️ This image does not contain any EXIF metadata. This is normal for images that have been processed, screenshots, or images saved without preserving metadata.")
+                except Exception as e:
+                    st.warning(f"Could not read EXIF data: {str(e)}")
+                    logger.error(f"Error displaying EXIF data: {str(e)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
         
         with col2:
             st.markdown("### Component Detection")
@@ -505,7 +669,7 @@ if uploaded_file is not None:
             # Show Gemini input in a dropdown
             with st.expander("🔍 Debug Gemini Input"):
                 if 'enum_img' in st.session_state.active_results:
-                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini", width=400)
+                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini")
         
         # Step 4: SPICE Analysis - keep as is
         if st.session_state.active_results.get('netlist_text') is not None:
