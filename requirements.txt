@@ -13,3 +13,4 @@ git+https://github.com/facebookresearch/sam2.git
 peft
 requests
 gdown
+openai

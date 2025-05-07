@@ -23,7 +23,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install PySpice with specific configuration
-RUN CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib/x86_64-linux-gnu" pip install PySpice==1.4.3 && \
+RUN CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib/x86_64-linux-gnu" pip install PySpice && \
     ln -s /usr/lib/x86_64-linux-gnu/libngspice.so.0 /usr/lib/libngspice.so
 
 COPY . .

@@ -3,6 +3,7 @@ from sklearn.preprocessing import StandardScaler
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import os
 from copy import deepcopy
 import matplotlib.pyplot as plt
 from .utils import (
@@ -24,10 +25,10 @@ from .sam2_infer import (
 )
 
 class CircuitAnalyzer():
-    def __init__(self, yolo_path='D:/SDP_demo/models/YOLO/best_large_model_yolo.pt', 
-                 sam2_config_path='D:/SDP_demo/models/configs/sam2.1_hiera_l.yaml',
-                 sam2_base_checkpoint_path='D:/SDP_demo/models/SAM2/sam2.1_hiera_large.pt',
-                 sam2_finetuned_checkpoint_path='D:/SDP_demo/models/SAM2/best_miou_model_SAM_latest.pth',
+    def __init__(self, yolo_path='models/YOLO/best_large_model_yolo.pt', 
+                 sam2_config_path='models/configs/sam2.1_hiera_l.yaml',
+                 sam2_base_checkpoint_path='models/SAM2/sam2.1_hiera_large.pt',
+                 sam2_finetuned_checkpoint_path='models/SAM2/best_miou_model_SAM_latest.pth',
                  use_sam2=True,
                  debug=False):
         self.yolo = YOLO(yolo_path)
@@ -148,7 +149,7 @@ class CircuitAnalyzer():
                 # Build Model Structure using the provided paths
                 print(f"Building SAM2 model with config: {sam2_config_path} and base checkpoint: {sam2_base_checkpoint_path}")
                 self.sam2_model = get_modified_sam2(
-                    model_cfg_path=str(sam2_config_path),
+                    model_cfg_path=f"/{sam2_config_path}" if not sam2_config_path.startswith('/') else sam2_config_path,
                     checkpoint_path=str(sam2_base_checkpoint_path),
                     device=str(self.sam2_device),
                     use_high_res_features=True,

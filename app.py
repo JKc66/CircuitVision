@@ -16,7 +16,6 @@ from src.utils import (summarize_components,
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
-from pathlib import Path
 
 # Configure logging
 # Get log level from environment or default to DEBUG
@@ -32,6 +31,7 @@ logger.info(f"Initializing Circuit Analyzer with log level: {log_level}")
 # Reduce verbosity of httpcore and openai loggers
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
 
 torch.classes.__path__ = []
 
@@ -52,30 +52,41 @@ def load_css(file_name):
 load_css("static/css/main.css")
 
 # Set up base paths
-BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / 'static/uploads'
-YOLO_MODEL_PATH = BASE_DIR / 'models/YOLO/best_large_model_yolo.pt'
-# Add SAM2 paths - use absolute paths for SAM2 as it requires specific path handling
-SAM2_CONFIG_PATH = Path(r"D:\SDP_demo\models\configs\sam2.1_hiera_l.yaml")
-SAM2_BASE_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\sam2.1_hiera_large.pt")  # Base model
-SAM2_FINETUNED_CHECKPOINT_PATH = Path(r"D:\SDP_demo\models\SAM2\best_miou_model_SAM_latest.pth")  # Fine-tuned weights
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, 'static/uploads')
+YOLO_MODEL_PATH = os.path.join(BASE_DIR, 'models/YOLO/best_large_model_yolo.pt')
+# Set SAM2 paths as absolute path objects
+SAM2_CONFIG_PATH_OBJ = os.path.join(BASE_DIR, 'models/configs/sam2.1_hiera_l.yaml')
+SAM2_BASE_CHECKPOINT_PATH_OBJ = os.path.join(BASE_DIR, 'models/SAM2/sam2.1_hiera_large.pt')
+SAM2_FINETUNED_CHECKPOINT_PATH_OBJ = os.path.join(BASE_DIR, 'models/SAM2/best_miou_model_SAM_latest.pth')
+# Convert to absolute paths for SAM2
+SAM2_CONFIG_PATH = "/" + os.path.abspath(SAM2_CONFIG_PATH_OBJ)  # Config path needs leading slash for Hydra
+SAM2_BASE_CHECKPOINT_PATH = os.path.abspath(SAM2_BASE_CHECKPOINT_PATH_OBJ)
+SAM2_FINETUNED_CHECKPOINT_PATH = os.path.abspath(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ)
 
 logger.info(f"Base directory: {BASE_DIR}")
 logger.info(f"YOLO model path: {YOLO_MODEL_PATH}")
+logger.info(f"SAM2 config path: {SAM2_CONFIG_PATH}")
+logger.info(f"SAM2 base checkpoint path: {SAM2_BASE_CHECKPOINT_PATH}")
+logger.info(f"SAM2 finetuned checkpoint path: {SAM2_FINETUNED_CHECKPOINT_PATH}")
+
 
 # Create necessary directories
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-(BASE_DIR / 'models/SAM2').mkdir(parents=True, exist_ok=True)  # Ensure models/SAM2 exists
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+sam2_dir = os.path.join(BASE_DIR, 'models/SAM2')
+if not os.path.exists(sam2_dir):
+    os.makedirs(sam2_dir, exist_ok=True)  # Ensure models/SAM2 exists
 logger.info(f"Created necessary directories: {UPLOAD_DIR}")
 
 # Check if SAM2 model files exist
-if not SAM2_CONFIG_PATH.exists() or not SAM2_BASE_CHECKPOINT_PATH.exists() or not SAM2_FINETUNED_CHECKPOINT_PATH.exists():
+if not os.path.exists(SAM2_CONFIG_PATH_OBJ) or not os.path.exists(SAM2_BASE_CHECKPOINT_PATH_OBJ) or not os.path.exists(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ):
     missing_files = []
-    if not SAM2_CONFIG_PATH.exists():
+    if not os.path.exists(SAM2_CONFIG_PATH_OBJ):
         missing_files.append(f"Config: {SAM2_CONFIG_PATH}")
-    if not SAM2_BASE_CHECKPOINT_PATH.exists():
+    if not os.path.exists(SAM2_BASE_CHECKPOINT_PATH_OBJ):
         missing_files.append(f"Base Checkpoint: {SAM2_BASE_CHECKPOINT_PATH}")
-    if not SAM2_FINETUNED_CHECKPOINT_PATH.exists():
+    if not os.path.exists(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ):
         missing_files.append(f"Fine-tuned Checkpoint: {SAM2_FINETUNED_CHECKPOINT_PATH}")
     
     logger.warning(f"One or more SAM2 model files not found:\n" + "\n".join(missing_files) + "\nSAM2 features will be disabled.")
@@ -148,6 +159,10 @@ if 'model_load_toast_shown' not in st.session_state:
 if 'previous_upload_name' not in st.session_state:
     st.session_state.previous_upload_name = None
 
+# Track analysis state
+if 'analysis_in_progress' not in st.session_state:
+    st.session_state.analysis_in_progress = False
+
 # Main content
 st.title("CircuitVision")
 
@@ -206,10 +221,10 @@ if uploaded_file is not None:
         st.session_state.active_results['original_image'] = image
         
         # Clear and save files
-        if UPLOAD_DIR.exists():
+        if os.path.exists(UPLOAD_DIR):
             shutil.rmtree(UPLOAD_DIR)
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        image_path = UPLOAD_DIR / f'1.{uploaded_file.name.split(".")[-1]}'
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        image_path = os.path.join(UPLOAD_DIR, f'1.{uploaded_file.name.split(".")[-1]}')
         save_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # Convert back to BGR for saving
         cv2.imwrite(str(image_path), save_image)
         
@@ -224,7 +239,10 @@ if uploaded_file is not None:
             st.session_state.active_results['original_image'] = image
     
     # Add a prominent "Start Analysis" button
-    if st.button("⚡ Start Analysis", use_container_width=True, type="primary"):
+    if st.button("⚡ Start Analysis", use_container_width=True, type="primary", disabled=st.session_state.analysis_in_progress):
+        
+        # Set analysis in progress
+        st.session_state.analysis_in_progress = True
         
         # Create a placeholder for the custom loader and text
         loader_placeholder = st.empty()
@@ -356,6 +374,9 @@ if uploaded_file is not None:
 
             # Clear the custom loader and text
             loader_placeholder.empty()
+            
+            # Reset analysis in progress
+            st.session_state.analysis_in_progress = False
     
     # Display results section after analysis
     if st.session_state.active_results['original_image'] is not None:
@@ -485,4 +506,4 @@ if uploaded_file is not None:
                     error_msg = f"❌ SPICE Analysis Error: {str(e)}"
                     logger.error(error_msg)
                     st.error(error_msg)
-                    st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.") 
+                    st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
