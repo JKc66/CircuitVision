@@ -166,7 +166,7 @@ def gemini_labels_openrouter(image_file):
         base_url="https://openrouter.ai/api/v1",
         api_key=openrouter_api_key,
         default_headers={
-            "HTTP-Referer": "http://circuit-analyzer",
+            "HTTP-Referer": "https://app.jawadk.me/circuits/",
             "X-Title": "Circuit Analyzer"
         }
     )
@@ -180,8 +180,9 @@ def gemini_labels_openrouter(image_file):
     base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
     # Using OpenRouter's model
-    OPENROUTER_MODEL = "google/gemini-2.5-pro-preview"
-    
+    # OPENROUTER_MODEL = "google/gemini-2.5-pro-preview"
+    OPENROUTER_MODEL = "google/gemini-2.5-flash-preview"
+
     try:
         response = client.chat.completions.create(
             model=OPENROUTER_MODEL,

@@ -331,6 +331,11 @@ if uploaded_file is not None:
         
         # Update previous upload name
         st.session_state.previous_upload_name = uploaded_file.name
+        
+        # Automatically trigger analysis
+        st.session_state.start_analysis_triggered = True
+        st.session_state.analysis_in_progress = True
+        st.rerun()  # Force immediate rerun to start analysis
     else:
         # If it's the same file, just ensure we have the image loaded
         if st.session_state.active_results['original_image'] is None:
@@ -339,13 +344,6 @@ if uploaded_file is not None:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             st.session_state.active_results['original_image'] = image
     
-    # Add a prominent "Start Analysis" button
-    if st.button("⚡ Start Analysis", use_container_width=True, type="primary", disabled=st.session_state.analysis_in_progress):
-        if not st.session_state.analysis_in_progress: # Safety check
-            st.session_state.start_analysis_triggered = True
-            st.session_state.analysis_in_progress = True # Set this to True to disable button on rerun
-            st.rerun() # Force immediate rerun to show button as disabled
-
     # Analysis logic, executed if triggered
     if st.session_state.get('start_analysis_triggered', False):
         st.session_state.start_analysis_triggered = False # Consume the trigger
