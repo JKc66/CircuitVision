@@ -43,6 +43,30 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Add custom HTML head elements for better social media previews
+st.markdown("""
+    <head>
+        <!-- Primary Meta Tags -->
+        <title>CircuitVision</title>
+        <meta name="description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
+
+        <!-- Facebook Meta Tags -->
+        <meta property="og:url" content="https://app.jawadk.me/circuits/">
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="CircuitVision">
+        <meta property="og:description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
+        <meta property="og:image" content="https://opengraph.b-cdn.net/production/images/762a2284-6adb-4b5f-96b6-7ce3cf615404.jpg?token=uKkwQNRxnUzq5h9_YYmLCkz6v_vL4f48uRXla77bKcI&height=901&width=1200&expires=33282582202">
+
+        <!-- Twitter Meta Tags -->
+        <meta name="twitter:card" content="summary_large_image">
+        <meta property="twitter:domain" content="app.jawadk.me">
+        <meta property="twitter:url" content="https://app.jawadk.me/circuits/">
+        <meta name="twitter:title" content="CircuitVision">
+        <meta name="twitter:description" content="AI-powered circuit diagram analyzer that detects components, analyzes connections, and generates SPICE netlists instantly.">
+        <meta name="twitter:image" content="https://opengraph.b-cdn.net/production/images/762a2284-6adb-4b5f-96b6-7ce3cf615404.jpg?token=uKkwQNRxnUzq5h9_YYmLCkz6v_vL4f48uRXla77bKcI&height=901&width=1200&expires=33282582202">
+    </head>
+""", unsafe_allow_html=True)
+
 # Function to load custom CSS
 def load_css(file_name):
     with open(file_name) as f:

@@ -10,21 +10,23 @@ RUN apt-get update && apt-get install -y \
     libngspice0-dev \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Set environment variables for PySpice
-ENV SPICE_LIB=/usr/share/ngspice/scripts \
-    PYTHONPATH="${PYTHONPATH}:/usr/local/lib/python3.12/site-packages" \
-    NGSPICE_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libngspice.so.0
+# Set environment variables for PySpice with ARM64 paths
+ENV PYTHONPATH=/usr/local/lib/python3.12/site-packages \
+    LD_LIBRARY_PATH=/lib/aarch64-linux-gnu \
+    SPICE_LIB=/usr/share/ngspice/scripts \
+    NGSPICE_LIBRARY_PATH=/lib/aarch64-linux-gnu/libngspice.so
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install PySpice with specific configuration
-RUN CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib/x86_64-linux-gnu" pip install PySpice && \
-    ln -s /usr/lib/x86_64-linux-gnu/libngspice.so.0 /usr/lib/libngspice.so
+# Install PySpice with ARM64-specific configuration
+RUN CFLAGS="-I/usr/include" LDFLAGS="-L/lib/aarch64-linux-gnu" pip install PySpice && \
+    ln -s /lib/aarch64-linux-gnu/libngspice.so /usr/lib/libngspice.so
 
 COPY . .
 

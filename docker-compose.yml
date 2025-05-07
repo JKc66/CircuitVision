@@ -1,0 +1,15 @@
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+      - ./models:/app/models
+    environment:
+      - PYTHONPATH=/app
+    env_file:
+      - .env
