@@ -228,6 +228,10 @@ if 'analysis_in_progress' not in st.session_state:
 if 'start_analysis_triggered' not in st.session_state:
     st.session_state.start_analysis_triggered = False
 
+# Add new session state variable after the other session state declarations (around line 236)
+if 'final_netlist_generated' not in st.session_state:
+    st.session_state.final_netlist_generated = False
+
 # Main content
 st.title("CircuitVision")
 
@@ -285,6 +289,9 @@ if uploaded_file is not None:
             'detailed_timings': {}, # Added for detailed timings
             'image_path': image_path  # Store the image path in session state
         }
+        
+        # Reset the final netlist generation flag
+        st.session_state.final_netlist_generated = False
         
         # Store original image
         st.session_state.active_results['original_image'] = image
@@ -352,7 +359,7 @@ if uploaded_file is not None:
                 st.markdown("""
                     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
                         <div class="loader"></div>
-                        <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Running complete circuit analysis...</p>
+                        <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">please wait ...</p>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -427,43 +434,28 @@ if uploaded_file is not None:
                 step_start_time = time.time()
                 if st.session_state.active_results['nodes'] is not None:
                     try:
-                        logger.debug("Step 3: Generating netlist...")
+                        logger.debug("Step 3: Generating initial netlist...")
                         # Initial Netlist
                         valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.active_results['nodes'])
                         valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
                         logger.debug(f"Generated initial netlist with {len(valueless_netlist)} components")
                         
-                        # Final Netlist
-                        netlist = deepcopy(valueless_netlist)
-                        logger.debug("Enumerating components for Gemini labeling...")
-                        enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.active_results['original_image'], st.session_state.active_results['bboxes'])
-                        logger.debug("Calling Gemini for component labeling...")
-                        
-                        # Wrap Gemini call in try/except to handle API failures gracefully
-                        try:
-                            gemini_info = gemini_labels_openrouter(enum_img)
-                            logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
-                            analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
-                        except Exception as gemini_error:
-                            logger.error(f"Error calling Gemini API: {str(gemini_error)}")
-                            st.warning(f"Could not get component values from AI: {str(gemini_error)}. Using basic netlist.")
-                            # Still use the valueless netlist
-                            netlist = valueless_netlist
-                        
-                        # Debug: Log the state of netlist lines before stringifying
-                        if logger.isEnabledFor(logging.DEBUG):
-                            for i, ln_debug in enumerate(netlist):
-                                logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
-                                
-                        netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
-                        logger.debug("Final netlist generation complete")
-                        
-                        st.session_state.active_results['netlist'] = netlist
-                        st.session_state.active_results['netlist_text'] = netlist_text
+                        # Store initial netlist
+                        st.session_state.active_results['netlist'] = valueless_netlist
                         st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
+                        st.session_state.active_results['netlist_text'] = valueless_netlist_text  # Use valueless as initial netlist text
+                        
+                        # Prepare for final netlist generation
+                        logger.debug("Enumerating components for later Gemini labeling...")
+                        enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.active_results['original_image'], st.session_state.active_results['bboxes'])
+                        # Convert BGR to RGB for display and Gemini
+                        if enum_img is not None:
+                            enum_img = cv2.cvtColor(enum_img, cv2.COLOR_BGR2RGB)
                         st.session_state.active_results['enum_img'] = enum_img
+                        st.session_state.active_results['bbox_ids'] = bbox_ids  # Store for later use
+                        
                     except Exception as netlist_error:
-                        error_msg = f"Error generating netlist: {str(netlist_error)}"
+                        error_msg = f"Error generating initial netlist: {str(netlist_error)}"
                         logger.error(error_msg)
                         st.error(error_msg)
                 else:
@@ -479,6 +471,7 @@ if uploaded_file is not None:
                             valueless_netlist = analyzer.generate_netlist_from_nodes(empty_nodes)
                             st.session_state.active_results['netlist'] = valueless_netlist
                             st.session_state.active_results['netlist_text'] = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
+                            st.session_state.active_results['valueless_netlist_text'] = st.session_state.active_results['netlist_text']
                         except Exception as fallback_error:
                             logger.error(f"Error generating fallback netlist: {str(fallback_error)}")
                 
@@ -628,8 +621,8 @@ if uploaded_file is not None:
             
             with col1:
                 st.markdown("### Contours")
-                if st.session_state.active_results['contour_image'] is not None:
-                    st.image(st.session_state.active_results['contour_image'], use_container_width=True)
+                if st.session_state.active_results['node_visualization'] is not None:
+                    st.image(st.session_state.active_results['node_visualization'], use_container_width=True)
             
             with col2:
                 st.markdown("### SAM2 Segmentation")
@@ -648,13 +641,86 @@ if uploaded_file is not None:
                     if st.session_state.active_results['enhanced_mask'] is not None:
                         st.image(st.session_state.active_results['enhanced_mask'], caption="Enhanced Mask", use_container_width=True)
                 
-                if st.session_state.active_results['node_visualization'] is not None:
-                    st.image(st.session_state.active_results['node_visualization'], caption="Final Node Connections", use_container_width=True)
+                if st.session_state.active_results['contour_image'] is not None:
+                    st.image(st.session_state.active_results['contour_image'], caption="Final Node Connections", use_container_width=True)
         
         # Step 3: Netlist
         if st.session_state.active_results.get('netlist_text') is not None:
+            # Modified layout to align column sizes better
             st.markdown("## 📝 Circuit Netlist")
             
+            # Create columns for button and loader with a better ratio
+            btn_col, loader_col = st.columns([4, 1])
+            
+            # Move button to the first column
+            with btn_col:
+                netlist_btn = st.button("Get Final Netlist", use_container_width=True, type="primary", disabled=st.session_state.final_netlist_generated)
+            
+            # Add the loader in the second column
+            with loader_col:
+                # Create a container for the loader with better vertical alignment
+                if netlist_btn:
+                    st.markdown('<div style="display:flex; align-items:center; justify-content:center; height:100%; min-height:38px;"><div class="gemini-loader"></div></div>', unsafe_allow_html=True)
+                else:
+                    # Empty container to maintain layout when loader is not shown
+                    st.markdown('<div style="height:38px;"></div>', unsafe_allow_html=True)
+            
+            # Process the button click
+            if netlist_btn and not st.session_state.final_netlist_generated:
+                try:
+                    final_start_time = time.time()
+                    
+                    # Get the stored data needed for final netlist generation
+                    valueless_netlist = st.session_state.active_results['netlist']
+                    enum_img = st.session_state.active_results['enum_img']
+                    bbox_ids = st.session_state.active_results['bbox_ids']
+                    
+                    # Create deep copy for the final netlist
+                    netlist = deepcopy(valueless_netlist)
+                    
+                    # Call Gemini for component labeling
+                    try:
+                        logger.debug("Calling Gemini for component labeling...")
+                        gemini_info = gemini_labels_openrouter(enum_img)
+                        logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
+                        analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
+                    except Exception as gemini_error:
+                        logger.error(f"Error calling Gemini API: {str(gemini_error)}")
+                        st.warning(f"Could not get component values from AI: {str(gemini_error)}. Using basic netlist.")
+                        # Still use the valueless netlist
+                        netlist = valueless_netlist
+                    
+                    # Debug: Log the state of netlist lines before stringifying
+                    if logger.isEnabledFor(logging.DEBUG):
+                        for i, ln_debug in enumerate(netlist):
+                            logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
+                    
+                    # Generate the final netlist text
+                    netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
+                    
+                    # Store the results
+                    st.session_state.active_results['netlist'] = netlist
+                    st.session_state.active_results['netlist_text'] = netlist_text
+                    
+                    # Calculate and store the final netlist generation time
+                    final_elapsed_time = time.time() - final_start_time
+                    if 'detailed_timings' in st.session_state.active_results:
+                        st.session_state.active_results['detailed_timings']['Final Netlist Generation'] = final_elapsed_time
+                    
+                    # Mark as completed
+                    st.session_state.final_netlist_generated = True
+                    
+                    # Show success message
+                    st.success("Final netlist generated successfully!")
+                    
+                    # Force a rerun to update the UI
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Error generating final netlist: {str(e)}")
+                    logger.error(f"Error generating final netlist: {str(e)}")
+            
+            # Display netlists in columns
             col1, col2 = st.columns(2)
             
             with col1:
@@ -664,7 +730,10 @@ if uploaded_file is not None:
             
             with col2:
                 st.markdown("### Final Netlist")
-                st.code(st.session_state.active_results['netlist_text'], language="python")
+                if st.session_state.final_netlist_generated:
+                    st.code(st.session_state.active_results['netlist_text'], language="python")
+                else:
+                    st.info("Click 'Get Final Netlist' to generate the final netlist with component values")
             
             # Show Gemini input in a dropdown
             with st.expander("🔍 Debug Gemini Input"):
