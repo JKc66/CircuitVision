@@ -264,63 +264,69 @@ class CircuitAnalyzer():
     def segment_with_sam2(self, image_np_bgr):
         """
         Segments the circuit diagram using the loaded SAM 2 model.
+        Also computes a bounding box encompassing all detected SAM2 mask contours.
 
         Args:
             image_np_bgr (np.ndarray): Input image in BGR format (from cv2.imread).
 
         Returns:
-            np.ndarray: Binary mask (uint8, 0 or 255) where 255 represents wires/connections,
-                        at the original image resolution. Returns None if SAM 2 is not available or fails.
+            Tuple[np.ndarray | None, np.ndarray | None, Tuple[int,int,int,int] | None]:
+                - mask_binary_np: Binary mask (uint8, 0 or 255) from SAM2, at original image resolution.
+                - self.last_sam2_output: Colored version of the mask for display.
+                - sam_extent_bbox: Tuple (xmin, ymin, xmax, ymax) of the bounding box around SAM2 contours, or None.
         """
         if not self.use_sam2 or self.sam2_model is None or self.sam2_transforms is None:
             print("SAM 2 is not available or not initialized. Cannot segment.")
             self.last_sam2_output = None
-            return None
+            return None, None, None
 
-        print("Segmenting with SAM 2...")
+        if self.debug:
+            print("Segmenting with SAM 2...")
         try:
-            # 1. Prepare Input Image
             image_np_rgb = cv2.cvtColor(image_np_bgr, cv2.COLOR_BGR2RGB)
             image_pil = Image.fromarray(image_np_rgb)
             orig_hw = image_np_rgb.shape[:2]
 
-            # 2. Preprocess
             image_tensor = self.sam2_transforms(image_pil).unsqueeze(0).to(self.sam2_device)
 
-            # 3. Inference
-            self.sam2_model.eval() # Ensure evaluation mode
+            self.sam2_model.eval()
             with torch.no_grad():
-                # Use the SAM2 model from sam2_infer
                 high_res_mask, low_res_mask, _ = self.sam2_model(image_tensor)
-                # Choose high_res mask for better detail
                 chosen_mask = high_res_mask
 
-            # 4. Postprocess
-            final_mask_tensor = self.sam2_transforms.postprocess_masks(chosen_mask, orig_hw) # Shape (1, 1, H, W)
+            final_mask_tensor = self.sam2_transforms.postprocess_masks(chosen_mask, orig_hw)
+            mask_squeezed = final_mask_tensor.detach().cpu().squeeze()
+            mask_binary_np = (mask_squeezed > 0.0).numpy().astype(np.uint8) * 255
 
-            # 5. Convert to Binary NumPy Mask
-            mask_squeezed = final_mask_tensor.detach().cpu().squeeze() # Shape (H, W)
-            mask_binary_np = (mask_squeezed > 0.0).numpy().astype(np.uint8) * 255 # Threshold and scale to 0/255
-
-            # Store for debugging visualization
-            self.last_sam2_output = mask_binary_np.copy()
-            
-            # Create a colored version for better visualization
+            # Store colored version for display
             colored_output = cv2.cvtColor(mask_binary_np, cv2.COLOR_GRAY2BGR)
-            colored_output[:,:,0] = 0  # Set blue channel to 0
-            colored_output[:,:,2] = 0  # Set red channel to 0
-            # Now the mask will be visualized in green
+            colored_output[:,:,0] = 0
+            colored_output[:,:,2] = 0
             self.last_sam2_output = colored_output
 
-            print("SAM 2 Segmentation successful.")
-            return mask_binary_np
+            # --- Calculate bounding box of SAM2 mask contours ---
+            sam_extent_bbox = None
+            contours_sam, _ = cv2.findContours(mask_binary_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours_sam:
+                all_points = np.concatenate(contours_sam)
+                x_sam, y_sam, w_sam, h_sam = cv2.boundingRect(all_points)
+                sam_extent_bbox = (x_sam, y_sam, x_sam + w_sam, y_sam + h_sam)
+                if self.debug:
+                    print(f"SAM2 Extent BBox calculated: {sam_extent_bbox}")
+            elif self.debug:
+                print("No contours found in SAM2 mask to calculate extent bbox.")
+            # --- End BBox Calculation ---
+
+            if self.debug:
+                print("SAM 2 Segmentation successful.")
+            return mask_binary_np, self.last_sam2_output, sam_extent_bbox
 
         except Exception as e:
             print(f"Error during SAM 2 segmentation: {e}")
             import traceback
             print(traceback.format_exc())
             self.last_sam2_output = None
-            return None # Return None on failure
+            return None, None, None
     
     def get_contours(self, img, area_threshold=0.00040):
         """
@@ -686,218 +692,264 @@ class CircuitAnalyzer():
         return img
     
     
-    def get_node_connections(self, image, bboxes, original_size=False):
-        original = image.copy()
-        image = image.copy()
-        
-        # --- Segmentation ---
-        if self.use_sam2:
-            # Try SAM2 segmentation
-            wire_mask = self.segment_with_sam2(image)
-            if wire_mask is None:
-                # Instead of fallback, raise an exception when SAM2 fails
-                raise ValueError("SAM2 segmentation failed and no fallback is configured")
-            else:
-                # Get emptied mask from SAM2 segmentation
-                emptied_mask = wire_mask.copy()
-                height, width = emptied_mask.shape[:2]
-                
-                # Empty out component areas
-                for bbox in bboxes:
-                    if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
-                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
-                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
-                        if ymin < ymax and xmin < xmax:
-                            emptied_mask[ymin:ymax, xmin:xmax] = 0
-                
-                # Apply circuit bbox if present
-                for bbox in bboxes:
-                    if bbox['class'] == 'circuit':
-                        new_mask = np.zeros_like(emptied_mask)
-                        ymin, ymax = max(0, int(bbox['ymin'])), min(height, int(bbox['ymax']))
-                        xmin, xmax = max(0, int(bbox['xmin'])), min(width, int(bbox['xmax']))
-                        if ymin < ymax and xmin < xmax:
-                            new_mask[ymin:ymax, xmin:xmax] = emptied_mask[ymin:ymax, xmin:xmax]
-                        emptied_mask = new_mask
-                        break
-                
-                # Resize for processing
-                emptied_mask, resized_bboxes = self.resize_image_keep_aspect(emptied_mask, bboxes)
-        else:
-            # Instead of traditional segmentation, raise exception when SAM2 is disabled
-            raise ValueError("SAM2 is disabled and no fallback is configured")
-        
-        if self.debug:
-            self.show_image(emptied_mask, 'Emptied')
-            
-        enhanced = self.enhance_lines(emptied_mask)
-        if self.debug:
-            self.show_image(enhanced, 'Enhanced')
-            
-        contours, contour_image = self.get_contours(enhanced)
-        if self.debug:
-            self.show_image(contour_image, 'Contours')
-            
-        # Initialize nodes dictionary with all contours
-        nodes = {i['id']:{'id': i['id'], 'components': [], 'contour': i['contour']} for i in contours}
+    def crop_image_and_adjust_bboxes(self, image_to_crop, bboxes_to_adjust, crop_defining_bbox, padding=10):
+        """
+        Crops an image based on a defining bounding box and adjusts other bounding boxes.
+        Preserves persistent_uid on adjusted bboxes.
 
-        # Loop through components to find connections
-        # Initialize rects_image for debug visualization of component-contour overlaps
-        # This image will show the contours and then bounding boxes of components being checked.
-        # If self.debug is true, it's shown at the end of this loop.
-        # We make a fresh copy from contour_image as it's a good base.
-        # Note: Previously rects_image was based on corners_image.
-        rects_image = contour_image.copy()
+        Args:
+            image_to_crop (np.ndarray): The original image to be cropped.
+            bboxes_to_adjust (List[Dict]): List of bboxes (e.g., from YOLO) in original image coordinates.
+            crop_defining_bbox (Tuple[int,int,int,int] | None): Bbox (xmin, ymin, xmax, ymax) defining the crop area.
+                                                        If None, returns originals.
+            padding (int): Padding around crop_defining_bbox.
 
-        for i, bbox_comp in enumerate(resized_bboxes):
-            if bbox_comp['class'] in self.non_components:
+        Returns:
+            Tuple[np.ndarray, List[Dict], Tuple[int, int, int, int] | None]:
+                - Cropped image (or original if no crop_defining_bbox or invalid crop).
+                - New list of adjusted bboxes (or original if no crop).
+                - Crop area details (crop_abs_xmin, crop_abs_ymin, new_width, new_height) relative to original, or None.
+        """
+        if crop_defining_bbox is None:
+            if self.debug:
+                print("Crop: No crop_defining_bbox provided. Returning originals.")
+            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], None
+
+        original_height, original_width = image_to_crop.shape[:2]
+        def_xmin, def_ymin, def_xmax, def_ymax = crop_defining_bbox
+
+        crop_abs_xmin = max(0, def_xmin - padding)
+        crop_abs_ymin = max(0, def_ymin - padding)
+        crop_abs_xmax = min(original_width, def_xmax + padding)
+        crop_abs_ymax = min(original_height, def_ymax + padding)
+
+        if self.debug:
+            print(f"Crop: Original dims: {original_width}x{original_height}")
+            print(f"Crop: Defining bbox for crop: {crop_defining_bbox}")
+            print(f"Crop: Calculated absolute crop area (xmin,ymin,xmax,ymax): {crop_abs_xmin}, {crop_abs_ymin}, {crop_abs_xmax}, {crop_abs_ymax}")
+
+        if crop_abs_xmin >= crop_abs_xmax or crop_abs_ymin >= crop_abs_ymax:
+            if self.debug:
+                print("Crop: Invalid crop region. Returning originals.")
+            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], None
+
+        cropped_image = image_to_crop[crop_abs_ymin:crop_abs_ymax, crop_abs_xmin:crop_abs_xmax]
+        new_height, new_width = cropped_image.shape[:2]
+        if self.debug:
+            print(f"Crop: Cropped image shape: {cropped_image.shape}")
+
+        adjusted_bboxes = []
+        for bbox_original in bboxes_to_adjust:
+            adj_bbox = deepcopy(bbox_original) # Carries over persistent_uid
+            adj_bbox['xmin'] = bbox_original['xmin'] - crop_abs_xmin
+            adj_bbox['ymin'] = bbox_original['ymin'] - crop_abs_ymin
+            adj_bbox['xmax'] = bbox_original['xmax'] - crop_abs_xmin
+            adj_bbox['ymax'] = bbox_original['ymax'] - crop_abs_ymin
+
+            adj_bbox['xmin'] = max(0, adj_bbox['xmin'])
+            adj_bbox['ymin'] = max(0, adj_bbox['ymin'])
+            adj_bbox['xmax'] = min(new_width, adj_bbox['xmax'])
+            adj_bbox['ymax'] = min(new_height, adj_bbox['ymax'])
+
+            if adj_bbox['xmax'] > adj_bbox['xmin'] and adj_bbox['ymax'] > adj_bbox['ymin']:
+                adjusted_bboxes.append(adj_bbox)
+            elif self.debug:
+                print(f"Crop: Bbox for class {adj_bbox.get('class')} (UID: {adj_bbox.get('persistent_uid')}) filtered out. Orig coords: {bbox_original[ 'xmin']},{bbox_original['ymin']}. Adjusted: {adj_bbox[ 'xmin']},{adj_bbox['ymin']}")
+        
+        if self.debug:
+            print(f"Crop: Original bbox count: {len(bboxes_to_adjust)}, Adjusted bbox count: {len(adjusted_bboxes)}")
+        
+        return cropped_image, adjusted_bboxes, (crop_abs_xmin, crop_abs_ymin, new_width, new_height)
+
+    def get_node_connections(self, _image_for_context, processing_wire_mask, bboxes_relative_to_mask):
+        if self.debug:
+            print(f"Node Connections: Received processing_wire_mask shape: {processing_wire_mask.shape}, {len(bboxes_relative_to_mask)} bboxes.")
+
+        # --- Mask Preparation (Input `processing_wire_mask` is already the cropped SAM2 mask) ---
+        emptied_mask = processing_wire_mask.copy()
+        current_height, current_width = emptied_mask.shape[:2]
+
+        for bbox_comp in bboxes_relative_to_mask:
+            if bbox_comp['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'): # 'circuit' may not exist or be relevant here
+                ymin, ymax = max(0, int(bbox_comp['ymin'])), min(current_height, int(bbox_comp['ymax']))
+                xmin, xmax = max(0, int(bbox_comp['xmin'])), min(current_width, int(bbox_comp['xmax']))
+                if ymin < ymax and xmin < xmax:
+                    emptied_mask[ymin:ymax, xmin:xmax] = 0
+        
+        if self.debug:
+            self.show_image(emptied_mask, 'Emptied Mask (from cropped SAM2, pre-resize)')
+
+        # Resize this emptied_mask (derived from cropped SAM2) and its corresponding bboxes for contour processing
+        # Note: bboxes_relative_to_mask are already relative to the full extent of emptied_mask before this resize.
+        processing_mask_resized, processing_bboxes_resized = self.resize_image_keep_aspect(emptied_mask, bboxes_relative_to_mask)
+
+        if self.debug:
+            self.show_image(processing_mask_resized, 'Processing Mask (Resized Emptied)')
+
+        enhanced = self.enhance_lines(processing_mask_resized)
+        if self.debug:
+            self.show_image(enhanced, 'Enhanced Processing Mask')
+            
+        contours, contour_image_viz = self.get_contours(enhanced)
+        if self.debug:
+            self.show_image(contour_image_viz, 'Contours on Resized Processing Mask')
+            
+        nodes = {item['id']:{'id': item['id'], 'components': [], 'contour': item['contour']} for item in contours}
+        
+        rects_image_viz = contour_image_viz.copy()
+
+        # Loop through the bboxes that were resized along with the processing_mask_resized
+        for i, bbox_comp_proc_resized in enumerate(processing_bboxes_resized):
+            if bbox_comp_proc_resized['class'] in self.non_components:
                 continue
             
-            # For debugging, can re-initialize rects_image per component if needed
-            # rects_image = contour_image.copy() 
-            xmin_comp, ymin_comp = int(bbox_comp['xmin']), int(bbox_comp['ymin'])
-            xmax_comp, ymax_comp = int(bbox_comp['xmax']), int(bbox_comp['ymax'])
-    
-            for contour_item in contours: # Iterate over each contour (potential wire)
-                # Bounding box of the current contour
+            if self.debug: 
+                cv2.rectangle(rects_image_viz, 
+                              (int(bbox_comp_proc_resized['xmin']), int(bbox_comp_proc_resized['ymin'])), 
+                              (int(bbox_comp_proc_resized['xmax']), int(bbox_comp_proc_resized['ymax'])), 
+                              (255, 100, 100), 1)
+
+            for contour_item in contours:
                 c_xmin_contour, c_ymin_contour, c_width_contour, c_height_contour = contour_item['rectangle']
                 c_xmax_contour = c_xmin_contour + c_width_contour
                 c_ymax_contour = c_ymin_contour + c_height_contour
                 
-                # Draw contour rectangle (for debugging visualization)
-                cv2.rectangle(rects_image, (c_xmin_contour, c_ymin_contour), (c_xmax_contour, c_ymax_contour), color=(0, 255, 0), thickness=1) 
+                if self.debug: 
+                     cv2.rectangle(rects_image_viz, (c_xmin_contour, c_ymin_contour), (c_xmax_contour, c_ymax_contour), color=(0, 255, 0), thickness=1)
     
-                # Broad phase: Check if component's bbox and contour's bbox overlap
-                if xmax_comp < c_xmin_contour or xmin_comp > c_xmax_contour or ymax_comp < c_ymin_contour or ymin_comp > c_ymax_contour:
-                    continue # No overlap between bounding boxes, so this contour cannot connect to this component
+                # Broad phase using resized coordinates
+                if bbox_comp_proc_resized['xmax'] < c_xmin_contour or bbox_comp_proc_resized['xmin'] > c_xmax_contour or \
+                   bbox_comp_proc_resized['ymax'] < c_ymin_contour or bbox_comp_proc_resized['ymin'] > c_ymax_contour:
+                    continue
                 
-                # Narrow phase: Iterate through each point of the actual contour
-                # contour_item['contour'] is a NumPy array of points (e.g., [[[x1,y1]], [[x2,y2]], ...])
                 for point_array in contour_item['contour']:
-                    point = tuple(point_array[0]) # Extract (x,y) from [[x,y]]
+                    point = tuple(point_array[0]) # Point is in resized coordinate system
                     
-                    if self.is_point_near_bbox(point, bbox_comp, pixel_threshold=6):
-                        # A point on the contour is near the component's bbox
-                        target_bbox_to_add = bboxes[i] if original_size else bbox_comp
+                    # is_point_near_bbox expects bbox_comp_proc_resized (already in resized system)
+                    if self.is_point_near_bbox(point, bbox_comp_proc_resized, pixel_threshold=6):
+                        # IMPORTANT: Store the component from bboxes_relative_to_mask (original scale of the cropped image),
+                        # using the index `i` from the enumerated processing_bboxes_resized.
+                        # This ensures persistent_uid and correct coordinates for fix_netlist are stored.
+                        target_bbox_to_add = deepcopy(bboxes_relative_to_mask[i])
                         
-                        # Check if this component is already associated with this node to avoid duplicates.
-                        # Construct a unique identifier for the component.
-                        component_id_tuple = (
-                            target_bbox_to_add['class'], 
-                            target_bbox_to_add['xmin'], target_bbox_to_add['ymin'],
-                            target_bbox_to_add['xmax'], target_bbox_to_add['ymax'],
-                            target_bbox_to_add.get('id') # Include 'id' if present (e.g., from enumerate_components)
-                        )
+                        component_unique_ref = target_bbox_to_add.get('persistent_uid')
+                        # Fallback if persistent_uid is somehow missing (should not happen with current crop logic)
+                        if component_unique_ref is None: 
+                             if self.debug: print(f"WARNING: persistent_uid missing for component: {target_bbox_to_add.get('class')}")
+                             component_unique_ref = (target_bbox_to_add['class'], target_bbox_to_add['xmin'], target_bbox_to_add['ymin'], target_bbox_to_add['xmax'], target_bbox_to_add['ymax'])
 
                         is_already_added = False
-                        for existing_comp in nodes[contour_item['id']]['components']:
-                            existing_comp_id_tuple = (
-                                existing_comp['class'],
-                                existing_comp['xmin'], existing_comp['ymin'],
-                                existing_comp['xmax'], existing_comp['ymax'],
-                                existing_comp.get('id')
-                            )
-                            if existing_comp_id_tuple == component_id_tuple:
+                        for existing_comp_node_data in nodes[contour_item['id']]['components']:
+                            existing_comp_ref = existing_comp_node_data.get('persistent_uid')
+                            if existing_comp_ref is None: # Fallback for existing components in node if UID was missing
+                                existing_comp_ref = (existing_comp_node_data['class'], existing_comp_node_data['xmin'], existing_comp_node_data['ymin'], existing_comp_node_data['xmax'], existing_comp_node_data['ymax'])
+                            
+                            if existing_comp_ref == component_unique_ref:
                                 is_already_added = True
                                 break
                         
                         if not is_already_added:
-                            nodes[contour_item['id']]['components'].append(deepcopy(target_bbox_to_add))
-                            
-                        # Connection found for this contour and this specific component.
-                        # No need to check other points of this contour against this same component.
-                        break 
+                            nodes[contour_item['id']]['components'].append(target_bbox_to_add)
+                            if self.debug:
+                                print(f"Node Conn: Added comp UID {target_bbox_to_add.get('persistent_uid')} to node {contour_item['id']}")
+                        break # Found connection for this contour and component
         
         if self.debug:
-            # This will show the rects_image for the last component processed, 
-            # or it needs to be moved inside the component loop to show for each.
-            # For now, keeping consistent with original placement.
-            self.show_image(rects_image, "Nodes - Contour/BBox Overlaps")
+            self.show_image(rects_image_viz, "Nodes - Contour/ResizedProcBBox Overlaps")
 
-        # Filter out empty nodes
-        valid_nodes = {node_id: node_data for node_id, node_data in nodes.items() 
-                      if node_data['components']}
+        valid_nodes = {node_id: node_data for node_id, node_data in nodes.items() if node_data['components']}
         
-        # Find node with most connections
-        max_connections = max(len(node_data['components']) for node_data in valid_nodes.values())
+        if not valid_nodes: 
+            if self.debug:
+                print("Node Conn: No valid nodes with components found.")
+            # Return structures matching expected output, but empty/default where appropriate
+            # final_node_viz_image should be based on processing_mask_resized dimensions
+            viz_fallback = processing_mask_resized.copy()
+            if len(viz_fallback.shape) == 2: viz_fallback = cv2.cvtColor(viz_fallback, cv2.COLOR_GRAY2BGR)
+            return [], emptied_mask, enhanced, contour_image_viz, viz_fallback
+
+        max_connections_node_val = max(len(node_data['components']) for node_data in valid_nodes.values())
+        
         nodes_with_max = [node_id for node_id, node_data in valid_nodes.items() 
-                         if len(node_data['components']) == max_connections]
+                         if len(node_data['components']) == max_connections_node_val]
 
+        chosen_ground_node_old_id = None
         if len(nodes_with_max) == 1:
-            # If there's only one node with max connections, it becomes node 0
-            old_id = nodes_with_max[0]
-        else:
-            # If multiple nodes have same number of connections, find the one connected to source
-            source_connected_nodes = []
-            for node_id in nodes_with_max:
-                components = valid_nodes[node_id]['components']
-                if any(comp['class'] == 'source' for comp in components):
-                    source_connected_nodes.append((node_id, 
-                                                # Get y-coordinate of the node
-                                                next(contour['rectangle'][1] 
-                                                     for contour in contours 
-                                                     if contour['id'] == node_id),
-                                                # Get x-coordinate of the node
-                                                next(contour['rectangle'][0] 
-                                                     for contour in contours 
-                                                     if contour['id'] == node_id)))
-    
-            if source_connected_nodes:
-                # Sort by y-coordinate (descending) then x-coordinate
-                source_connected_nodes.sort(key=lambda x: (-x[1], x[2]))
-                old_id = source_connected_nodes[0][0]
-            else:
-                # If no source connections, use the first node
-                old_id = nodes_with_max[0]
-
-        # Rename the chosen node to 0 and adjust other node numbers
-        new_nodes = []
-        used_ids = set()
-    
-        # First add the node that should be 0
-        new_nodes.append({
-            'id': 0,
-            'components': valid_nodes[old_id]['components'],
-            'contour': valid_nodes[old_id]['contour']
-        })
-        used_ids.add(old_id)
-    
-        # Then add all other nodes
-        current_id = 1
-                
-        for node_id, node_data in valid_nodes.items():
-            if node_id not in used_ids and len(node_data['components']) >= 2:
-                new_nodes.append({
-                    'id': current_id,
-                    'components': node_data['components'],
-                    'contour': node_data['contour']
-                })
-                current_id += 1
+            chosen_ground_node_old_id = nodes_with_max[0]
+        else: 
+            source_connected_nodes_for_ground = []
+            # Check against bboxes_relative_to_mask for source components as they have original class names
+            for node_id_candidate in nodes_with_max:
+                # Components stored in valid_nodes are from bboxes_relative_to_mask, so they have correct class for source check
+                components_in_node = valid_nodes[node_id_candidate]['components']
+                if any(comp['class'] in self.source_components for comp in components_in_node):
+                    contour_detail_for_node = next((c for c in contours if c['id'] == node_id_candidate), None)
+                    if contour_detail_for_node:
+                         # Use centroid y of contour_detail_for_node (which is in resized space)
+                         rect_x, rect_y, rect_w, rect_h = contour_detail_for_node['rectangle']
+                         source_connected_nodes_for_ground.append((node_id_candidate, rect_y + rect_h / 2))
+            
+            if source_connected_nodes_for_ground:
+                source_connected_nodes_for_ground.sort(key=lambda x: -x[1]) # Higher Y in image (lower on schematic) is preferred for ground
+                chosen_ground_node_old_id = source_connected_nodes_for_ground[0][0]
+            elif nodes_with_max: # If no sources, but still candidates for ground
+                chosen_ground_node_old_id = nodes_with_max[0]
+            else: # Should not be reached if valid_nodes is not empty
+                chosen_ground_node_old_id = list(valid_nodes.keys())[0] if valid_nodes else None 
         
+        new_nodes_list = []
+        if chosen_ground_node_old_id is not None and chosen_ground_node_old_id in valid_nodes:
+            new_nodes_list.append({
+                'id': 0, 
+                'components': valid_nodes[chosen_ground_node_old_id]['components'],
+                'contour': valid_nodes[chosen_ground_node_old_id]['contour'] # Contour is from resized space
+            })
+            
+            next_node_id_val = 1
+            # Sort other nodes by their original ID for consistent numbering if possible
+            sorted_other_node_ids = sorted([nid for nid in valid_nodes.keys() if nid != chosen_ground_node_old_id])
 
-        # Create visualization of final node numbering
-        final_visualization = emptied_mask.copy()
-        if len(final_visualization.shape) == 2:
-            final_visualization = cv2.cvtColor(final_visualization, cv2.COLOR_GRAY2BGR)
+            for old_node_id in sorted_other_node_ids:
+                node_data = valid_nodes[old_node_id]
+                # Ensure node has at least 2 components, unless it's the only other node making it node 1
+                if len(node_data['components']) >= 2 or (len(new_nodes_list) == 1 and len(valid_nodes) == 2 and len(node_data['components']) > 0 ) :
+                    new_nodes_list.append({
+                        'id': next_node_id_val,
+                        'components': node_data['components'],
+                        'contour': node_data['contour'] # Contour is from resized space
+                    })
+                    next_node_id_val += 1
+        # Fallback if ground node wasn't determined (should be rare if valid_nodes exist)
+        elif valid_nodes: 
+            if self.debug: print("Node Conn: Ground node ID not properly determined. Arbitrary numbering for all valid nodes.")
+            next_node_id_val = 0
+            for old_node_id in sorted(valid_nodes.keys()): # Iterate through all valid nodes
+                node_data = valid_nodes[old_node_id]
+                if len(node_data['components']) > 0: # Take any node with components
+                    new_nodes_list.append({
+                        'id': next_node_id_val,
+                        'components': node_data['components'],
+                        'contour': node_data['contour']
+                    })
+                    next_node_id_val += 1
+
+        # Final visualization should be on processing_mask_resized dimensions
+        final_node_viz_image = processing_mask_resized.copy()
+        if len(final_node_viz_image.shape) == 2: 
+            final_node_viz_image = cv2.cvtColor(final_node_viz_image, cv2.COLOR_GRAY2BGR)
         
-        for node in new_nodes:
-            # Find centroid of contour
-            M = cv2.moments(node['contour'])
+        for node_item_final in new_nodes_list:
+            # Moments and drawing are on contours from processing_mask_resized
+            M = cv2.moments(node_item_final['contour'])
             if M['m00'] != 0:
                 cx = int(M['m10'] / M['m00'])
                 cy = int(M['m01'] / M['m00'])
-                # Draw contour
-                cv2.drawContours(final_visualization, [node['contour']], -1, (0, 255, 0), 2)
-
-                # Draw node number
-                cv2.putText(final_visualization, str(node['id']), 
+                cv2.drawContours(final_node_viz_image, [node_item_final['contour']], -1, (0, 255, 0), 2) 
+                cv2.putText(final_node_viz_image, str(node_item_final['id']), 
                             (cx-10, cy+10), cv2.FONT_HERSHEY_SIMPLEX, 
-                            0.9, (0, 0, 255), 2)
+                            0.9, (0, 0, 255), 2) 
 
-        return new_nodes, emptied_mask, enhanced, contour_image, final_visualization
-
-    
-
+        return new_nodes_list, emptied_mask, enhanced, contour_image_viz, final_node_viz_image
 
     def generate_netlist_from_nodes(self, node_list):
         netlist = []

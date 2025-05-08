@@ -370,91 +370,139 @@ if uploaded_file is not None:
                 detailed_timings = {}
                 logger.info("Starting complete circuit analysis...")
                 
-                # Step 1: Detect Components
-                step_start_time = time.time()
+                # Step 1A: Initial Component Detection (YOLO on original image)
+                step_start_time_yolo = time.time()
+                raw_bboxes_orig_coords = []
                 if st.session_state.active_results['original_image'] is not None:
-                    logger.debug("Step 1: Detecting components...")
-                    # Get raw bounding boxes
-                    raw_bboxes = analyzer.bboxes(st.session_state.active_results['original_image'])
-                    logger.debug(f"Detected {len(raw_bboxes)} raw bounding boxes")
+                    logger.debug("Step 1A: Detecting components with YOLO on original image...")
+                    raw_bboxes_orig_coords = analyzer.bboxes(st.session_state.active_results['original_image'])
+                    logger.debug(f"Detected {len(raw_bboxes_orig_coords)} raw bounding boxes on original image")
                     
-                    # Apply Non-Maximum Suppression
-                    bboxes = non_max_suppression_by_confidence(raw_bboxes, iou_threshold=0.6)
-                    logger.debug(f"After NMS: {len(bboxes)} bounding boxes")
-                    st.session_state.active_results['bboxes'] = bboxes
-                    
-                    # Create annotated image using the utility function
-                    annotated_image = create_annotated_image(
-                        st.session_state.active_results['original_image'], 
-                        bboxes
-                    )
-                    st.session_state.active_results['annotated_image'] = annotated_image
-                    
-                    # Parse and display component counts using the utility function
-                    component_stats = calculate_component_stats(bboxes)
-                    logger.debug(f"Component statistics: {len(component_stats)} unique component types identified")
-                    st.session_state.active_results['component_stats'] = component_stats
+                    # Apply Non-Maximum Suppression to bboxes in original coordinates
+                    bboxes_orig_coords_nms = non_max_suppression_by_confidence(raw_bboxes_orig_coords, iou_threshold=0.6)
+                    logger.debug(f"After NMS: {len(bboxes_orig_coords_nms)} bounding boxes on original image")
+                    st.session_state.active_results['bboxes_orig_coords_nms'] = bboxes_orig_coords_nms
                 else:
-                    logger.error("No image found in session state")
-                    raise ValueError("No image found. Please upload an image and try again.")
-                detailed_timings['Component Detection'] = time.time() - step_start_time
+                    logger.error("No original image found for YOLO detection.")
+                    st.error("Error: Original image not loaded.")
+                    st.stop()
+                detailed_timings['YOLO Component Detection'] = time.time() - step_start_time_yolo
+
+                # Step 1B: SAM2 Segmentation (on original image) & Get SAM2 Extent
+                step_start_time_sam = time.time()
+                full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = None, None, None
+                if st.session_state.active_results['original_image'] is not None and analyzer.use_sam2:
+                    logger.debug("Step 1B: Performing SAM2 segmentation on original image...")
+                    full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = analyzer.segment_with_sam2(
+                        st.session_state.active_results['original_image']
+                    )
+                    st.session_state.active_results['sam2_output'] = sam2_colored_display_output # For display
+                    if sam_extent_bbox:
+                        logger.info(f"SAM2 extent bbox found: {sam_extent_bbox}")
+                    else:
+                        logger.warning("SAM2 did not return a valid extent bbox. Cropping will be skipped.")
+                elif not analyzer.use_sam2:
+                    logger.warning("SAM2 is disabled. Cropping based on SAM2 extent will be skipped.")
+                detailed_timings['SAM2 Segmentation & Extent'] = time.time() - step_start_time_sam
+
+                # Step 1C: Crop based on SAM2 Extent
+                step_start_time_crop = time.time()
+                image_for_analysis = st.session_state.active_results['original_image'] # Default
+                bboxes_for_analysis = st.session_state.active_results.get('bboxes_orig_coords_nms', [])
+                cropped_sam_mask_for_nodes = full_binary_sam_mask # Default to full if no crop
+                crop_details_returned = None
+
+                if sam_extent_bbox and full_binary_sam_mask is not None:
+                    logger.debug("Attempting to crop image and SAM2 mask based on SAM2 extent...")
+                    cropped_visual_image, adjusted_yolo_bboxes, crop_details_returned = analyzer.crop_image_and_adjust_bboxes(
+                        st.session_state.active_results['original_image'],
+                        st.session_state.active_results['bboxes_orig_coords_nms'],
+                        sam_extent_bbox,
+                        padding=50 # Added some padding
+                    )
+                    if crop_details_returned:
+                        image_for_analysis = cropped_visual_image
+                        bboxes_for_analysis = adjusted_yolo_bboxes
+                        # Crop the full_binary_sam_mask using crop_details_returned
+                        crop_x, crop_y, crop_w, crop_h = crop_details_returned
+                        cropped_sam_mask_for_nodes = full_binary_sam_mask[crop_y : crop_y + crop_h, crop_x : crop_x + crop_w]
+                        logger.info(f"Visual image and SAM2 mask cropped. Cropped SAM mask shape: {cropped_sam_mask_for_nodes.shape}")
+                        st.session_state.active_results['crop_details'] = crop_details_returned
+                    else:
+                        logger.warning("Cropping based on SAM2 extent failed or was not possible. Using originals.")
+                else:
+                    logger.info("Skipping crop: SAM2 extent bbox or full mask not available.")
                 
-                # Step 2: Node Analysis
-                step_start_time = time.time()
-                if st.session_state.active_results['bboxes'] is not None:
+                st.session_state.active_results['image_for_analysis'] = image_for_analysis
+                st.session_state.active_results['bboxes'] = bboxes_for_analysis # These are primary for node analysis & enum
+                st.session_state.active_results['cropped_sam_mask_for_nodes'] = cropped_sam_mask_for_nodes
+                detailed_timings['Image Cropping'] = time.time() - step_start_time_crop
+
+                # Step 1D: Create Annotated image for display (on image_for_analysis)
+                annotated_display_image = create_annotated_image(
+                    image_for_analysis, 
+                    bboxes_for_analysis 
+                )
+                st.session_state.active_results['annotated_image'] = annotated_display_image
+                
+                # Component Statistics from bboxes_for_analysis
+                component_stats = calculate_component_stats(bboxes_for_analysis)
+                st.session_state.active_results['component_stats'] = component_stats
+                # Combined timing for what was previously just "Component Detection"
+                # This now includes YOLO, SAM2-Extent, Cropping, and Annotation for display.
+                # For a more direct comparison, sum them up or keep separate as done with detailed_timings.
+
+                # Step 2: Node Analysis (using cropped SAM2 mask and adjusted bboxes)
+                step_start_time_nodes = time.time()
+                if bboxes_for_analysis is not None and cropped_sam_mask_for_nodes is not None and analyzer.use_sam2:
                     try:
-                        logger.debug("Step 2: Analyzing node connections...")
+                        logger.debug("Step 2: Analyzing node connections using cropped SAM mask and adjusted bboxes...")
                         nodes, emptied_mask, enhanced, contour_image, final_visualization = analyzer.get_node_connections(
-                            st.session_state.active_results['original_image'], 
-                            st.session_state.active_results['bboxes']
+                            image_for_analysis,             # Cropped visual image (for context)
+                            cropped_sam_mask_for_nodes,   # Cropped SAM2 binary mask (for processing)
+                            bboxes_for_analysis           # YOLO bboxes relative to cropped images
                         )
-                        
                         logger.debug(f"Node analysis completed: {len(nodes)} nodes identified")
                         st.session_state.active_results['nodes'] = nodes
                         st.session_state.active_results['node_visualization'] = final_visualization
-                        st.session_state.active_results['node_mask'] = emptied_mask
-                        st.session_state.active_results['enhanced_mask'] = enhanced
-                        st.session_state.active_results['contour_image'] = contour_image
-                        
-                        # Get SAM2 output if available
-                        if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2 and hasattr(analyzer, 'last_sam2_output'):
-                            logger.debug("SAM2 output available and stored")
-                            st.session_state.active_results['sam2_output'] = analyzer.last_sam2_output
-                            
+                        # The following are debug/intermediate images from node analysis, based on its internal processing scale
+                        st.session_state.active_results['node_mask'] = emptied_mask       # This is based on cropped_sam_mask_for_nodes after component removal
+                        st.session_state.active_results['enhanced_mask'] = enhanced     # Based on resized emptied_mask
+                        st.session_state.active_results['contour_image'] = contour_image  # Based on enhanced mask
+
                     except Exception as e:
                         error_msg = f"Error during node analysis: {str(e)}"
                         logger.error(error_msg)
                         st.error(error_msg)
-                        # Don't stop execution on node analysis error, but mark in log
                         logger.warning("Continuing execution despite node analysis error")
+                elif not analyzer.use_sam2:
+                    logger.warning("Node analysis skipped: SAM2 is disabled.")
+                    st.warning("Node analysis cannot be performed as SAM2 is disabled.")
                 else:
-                    logger.error("No bounding boxes found for node analysis")
-                    st.error("No components were detected. Please try a different image with clearer circuit elements.")
-                detailed_timings['Node Analysis'] = time.time() - step_start_time
+                    logger.error("Node analysis skipped: Bounding boxes or cropped SAM2 mask not available.")
+                    st.error("Components or circuit mask not ready for node analysis.")
+                detailed_timings['Node Analysis'] = time.time() - step_start_time_nodes
                 
                 # Step 3: Generate Netlist
-                step_start_time = time.time()
-                if st.session_state.active_results['nodes'] is not None:
+                step_start_time_netlist = time.time()
+                if st.session_state.active_results.get('nodes') is not None:
                     try:
                         logger.debug("Step 3: Generating initial netlist...")
-                        # Initial Netlist
                         valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.active_results['nodes'])
                         valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
                         logger.debug(f"Generated initial netlist with {len(valueless_netlist)} components")
                         
-                        # Store initial netlist
                         st.session_state.active_results['netlist'] = valueless_netlist
                         st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
-                        st.session_state.active_results['netlist_text'] = valueless_netlist_text  # Use valueless as initial netlist text
+                        st.session_state.active_results['netlist_text'] = valueless_netlist_text
                         
-                        # Prepare for final netlist generation
-                        logger.debug("Enumerating components for later Gemini labeling...")
-                        enum_img, bbox_ids = analyzer.enumerate_components(st.session_state.active_results['original_image'], st.session_state.active_results['bboxes'])
-                        # Convert BGR to RGB for display and Gemini
-                        if enum_img is not None:
-                            enum_img = cv2.cvtColor(enum_img, cv2.COLOR_BGR2RGB)
-                        st.session_state.active_results['enum_img'] = enum_img
-                        st.session_state.active_results['bbox_ids'] = bbox_ids  # Store for later use
+                        logger.debug("Enumerating components for later Gemini labeling on (potentially cropped) image_for_analysis...")
+                        enum_img, bbox_ids_with_visual_enum = analyzer.enumerate_components(
+                            image_for_analysis, # This is the potentially SAM2-extent cropped visual image
+                            deepcopy(bboxes_for_analysis) # These bboxes are relative to image_for_analysis and have persistent_uid
+                        )
+                        st.session_state.active_results['enum_img'] = enum_img # Potentially cropped and enumerated image for Gemini
+                        st.session_state.active_results['bbox_ids'] = bbox_ids_with_visual_enum
                         
                     except Exception as netlist_error:
                         error_msg = f"Error generating initial netlist: {str(netlist_error)}"
@@ -477,7 +525,7 @@ if uploaded_file is not None:
                         except Exception as fallback_error:
                             logger.error(f"Error generating fallback netlist: {str(fallback_error)}")
                 
-                detailed_timings['Netlist Generation'] = time.time() - step_start_time
+                detailed_timings['Netlist Generation'] = time.time() - step_start_time_netlist
                 
                 # Log analysis summary
                 if st.session_state.active_results.get('netlist') and log_level in ['DEBUG', 'INFO']:
@@ -593,6 +641,7 @@ if uploaded_file is not None:
         
         with col2:
             st.markdown("### Component Detection")
+            # Display the annotated image (which is based on image_for_analysis - potentially cropped)
             if st.session_state.active_results['annotated_image'] is not None:
                 st.image(st.session_state.active_results['annotated_image'], use_container_width=True)
                 
@@ -673,20 +722,25 @@ if uploaded_file is not None:
                     final_start_time = time.time()
                     
                     # Get the stored data needed for final netlist generation
+                    # valueless_netlist has component entries which include bboxes with persistent_uid
                     valueless_netlist = st.session_state.active_results['netlist']
-                    enum_img = st.session_state.active_results['enum_img']
-                    bbox_ids = st.session_state.active_results['bbox_ids']
+                    enum_img = st.session_state.active_results['enum_img'] # This is the (potentially cropped) image with numbers
+                    # bbox_ids are the bboxes from (potentially cropped) image, now with visual enumeration 'id' and 'persistent_uid'
+                    bbox_ids_for_fix = st.session_state.active_results['bbox_ids'] 
                     
                     # Create deep copy for the final netlist
                     netlist = deepcopy(valueless_netlist)
                     
                     # Call Gemini for component labeling
                     try:
-                        logger.debug("Calling Gemini for component labeling...")
-                        gemini_info = gemini_labels_openrouter(enum_img)
+                        logger.debug("Calling Gemini for component labeling using (potentially cropped) enumerated image...")
+                        # gemini_labels_openrouter receives the (potentially cropped) enum_img
+                        gemini_info = gemini_labels_openrouter(enum_img) 
                         logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
                         logger.info(f"GEMINI BARE OUTPUT (gemini_info): {gemini_info}")
-                        analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
+                        # fix_netlist will correlate gemini_info (using visual enum 'id') 
+                        # with netlist lines (via persistent_uid found in bbox_ids_for_fix)
+                        analyzer.fix_netlist(netlist, gemini_info, bbox_ids_for_fix)
                     except Exception as gemini_error:
                         logger.error(f"Error calling Gemini API: {str(gemini_error)}")
                         st.warning(f"Could not get component values from AI: {str(gemini_error)}. Using basic netlist.")
@@ -743,8 +797,8 @@ if uploaded_file is not None:
             
             # Show Gemini input in a dropdown
             with st.expander("🔍 Debug Gemini Input"):
-                if 'enum_img' in st.session_state.active_results:
-                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini")
+                if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
+                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini (potentially cropped and enumerated)")
         
         # Step 4: SPICE Analysis - keep as is
         if st.session_state.active_results.get('netlist_text') is not None:

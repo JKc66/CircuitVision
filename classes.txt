@@ -1,0 +1,33 @@
+Number of classes: 30
+
+Class names:
+Class 0: text
+Class 1: junction
+Class 2: crossover
+Class 3: terminal
+Class 4: gnd
+Class 5: vss
+Class 6: voltage.dc
+Class 7: voltage.ac
+Class 8: voltage.battery
+Class 9: resistor
+Class 10: resistor.adjustable
+Class 11: capacitor.unpolarized
+Class 12: capacitor.polarized
+Class 13: capacitor.adjustable
+Class 14: inductor
+Class 15: inductor.ferrite
+Class 16: transformer
+Class 17: diode
+Class 18: diode.light_emitting
+Class 19: diode.zener
+Class 20: thyristor
+Class 21: varistor
+Class 22: transistor.bjt
+Class 23: transistor.fet
+Class 24: operational_amplifier
+Class 25: integrated_circuit
+Class 26: integrated_circuit.voltage_regulator
+Class 27: switch
+Class 28: explanatory
+Class 29: unknown
