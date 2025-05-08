@@ -622,7 +622,7 @@ if uploaded_file is not None:
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("### Contours")
+                st.markdown("### Final Node Connections")
                 if st.session_state.active_results['node_visualization'] is not None:
                     st.image(st.session_state.active_results['node_visualization'], use_container_width=True)
             
@@ -644,7 +644,7 @@ if uploaded_file is not None:
                         st.image(st.session_state.active_results['enhanced_mask'], caption="Enhanced Mask", use_container_width=True)
                 
                 if st.session_state.active_results['contour_image'] is not None:
-                    st.image(st.session_state.active_results['contour_image'], caption="Final Node Connections", use_container_width=True)
+                    st.image(st.session_state.active_results['contour_image'], caption="Contours", use_container_width=True)
         
         # Step 3: Netlist
         if st.session_state.active_results.get('netlist_text') is not None:
