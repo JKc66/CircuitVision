@@ -418,7 +418,7 @@ if uploaded_file is not None:
                         st.session_state.active_results['original_image'],
                         st.session_state.active_results['bboxes_orig_coords_nms'],
                         sam_extent_bbox,
-                        padding=50 # Added some padding
+                        padding=75 # Added some padding
                     )
                     if crop_details_returned:
                         image_for_analysis = cropped_visual_image
