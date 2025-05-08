@@ -16,3 +16,4 @@ static/uploads
 *__pycache__/*
 progress.md
 combined_output.md
+models/configs/sam2.1_hiera_l.yaml
