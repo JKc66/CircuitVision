@@ -211,25 +211,38 @@ def gemini_labels_openrouter(image_file):
         
         # Clean up the response text
         formatted = response_text.strip('```python\n')
-        formatted = formatted.strip('```json\n')
+        formatted = formatted.strip('```json\\n')
         formatted = formatted.strip('```')
         
         try:
-            import json
-            # Parse using json.loads() instead of ast.literal_eval() to handle null values properly
-            parsed_data = json.loads(formatted)
+            # Primary attempt: ast.literal_eval for Python-style list of dicts.
+            # Prompt asks for "a python list of dictioaries".
+            # Replace 'null' with 'None' in case the LLM uses 'null' (valid in JSON)
+            # within a structure that is otherwise a Python literal (e.g. single quotes for keys).
+            # This makes ast.literal_eval more robust to LLM variations.
+            prepared_for_ast = formatted.replace('null', 'None')
+            parsed_data = ast.literal_eval(prepared_for_ast)
+            # If successful, can add print("Successfully parsed with ast.literal_eval.") for debugging
             return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON response: {e}")
-            print(f"Raw response: {formatted}")
-            # Fallback: Try to convert null to None for ast.literal_eval
+        except (SyntaxError, ValueError) as e_ast:
+            # Log that the primary attempt failed and we're trying the fallback.
+            print(f"Primary parsing (ast.literal_eval) failed: {e_ast}. Trying fallback (json.loads)...")
+            # It can be helpful to see the string that failed ast.literal_eval
+            # print(f"String passed to ast.literal_eval (after .replace('null','None')): {prepared_for_ast}")
             try:
-                formatted = formatted.replace('null', 'None')
-                parsed_data = ast.literal_eval(formatted)
+                # Fallback: Try json.loads.
+                # This would work if the LLM returned a strictly valid JSON string.
+                # No .replace() needed here for 'None' to 'null', as 'formatted' is the original
+                # string from LLM (after stripping ```). If it's JSON, it should use 'null'.
+                parsed_data = json.loads(formatted)
+                # If successful, can add print("Successfully parsed with json.loads as fallback.") for debugging
                 return parsed_data
-            except Exception as e2:
-                print(f"Fallback parsing also failed: {e2}")
-                raise ValueError(f"Failed to parse OpenRouter response: {e2}. Original response: {formatted}")
+            except json.JSONDecodeError as e_json:
+                # Both parsing methods failed. Log detailed error and the problematic string.
+                print(f"Fallback parsing (json.loads) also failed: {e_json}")
+                print(f"Original formatted string that failed both parsers: {formatted}")
+                # Re-raise a comprehensive error.
+                raise ValueError(f"Failed to parse OpenRouter response. ast.literal_eval error: {e_ast}, json.loads error: {e_json}. Formatted response: {formatted}")
     except openai.APIError as e:
         print(f"OpenRouter API Error with model {OPENROUTER_MODEL}: {e}")
         raise ValueError(f"OpenRouter API request failed: {str(e)}")

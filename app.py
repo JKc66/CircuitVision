@@ -34,6 +34,7 @@ logger.info(f"Initializing Circuit Analyzer with log level: {log_level}")
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
+logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 
 torch.classes.__path__ = []
 
@@ -233,7 +234,7 @@ if 'final_netlist_generated' not in st.session_state:
     st.session_state.final_netlist_generated = False
 
 # Main content
-st.title("CircuitVision")
+st.title("⏚ CircuitVision")
 
 # Show SAM2 status
 if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
@@ -355,9 +356,11 @@ if uploaded_file is not None:
 
             with loader_placeholder.container():
                 st.markdown("""
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
-                        <div class="loader"></div>
-                        <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">please wait ...</p>
+                    <div class="loader-popup-overlay">
+                        <div class="loader-popup-content">
+                            <div class="loader"></div>
+                            <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">please wait ...</p>
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -681,6 +684,7 @@ if uploaded_file is not None:
                         logger.debug("Calling Gemini for component labeling...")
                         gemini_info = gemini_labels_openrouter(enum_img)
                         logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
+                        logger.info(f"GEMINI BARE OUTPUT (gemini_info): {gemini_info}")
                         analyzer.fix_netlist(netlist, gemini_info, bbox_ids)
                     except Exception as gemini_error:
                         logger.error(f"Error calling Gemini API: {str(gemini_error)}")
