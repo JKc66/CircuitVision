@@ -693,6 +693,9 @@ if uploaded_file is not None:
                         for i, ln_debug in enumerate(netlist):
                             logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
                     
+                    # Filter out lines with None values before generating the final string
+                    netlist = [line for line in netlist if line.get('value') is not None and str(line.get('value')).strip().lower() != 'none']
+
                     # Generate the final netlist text
                     netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
                     
