@@ -45,21 +45,71 @@ components_dict = {
 
 # Gemini prompt for component analysis
 PROMPT = """
-Identify only the components and their values in this circuit schematic, 
-the id of each component is in red. return the object as a python list of dictioaries.
-If the values are just letters or don't exist for the component, the value should be None. 
-If components are defined using complex values, write the complex/imaginary value.
-Format the output as a list of dictionaries [
-    {'class': 'voltage.dependent', 'value':'35*V_2', 'direction':'down', 'id': '1'}, 
-    {'class': 'voltage.ac', 'value':'22k:30', 'direction': 'None', 'id': '2'}
-], 
-note how you always use the same ids of the components marked in red in the image,
-to identify the component. the closest red number to a component that component's id. 
-nothing else. 
-The value of the component should not specify the unit, 
-only the suffix such as k or M or m or nothing,
-there shouldn't be a space between the number and the suffix. 
-The classes included and their descriptions: """ + str(components_dict)
+You are an expert electrical engineering assistant. Your task is to analyze an image of a circuit schematic.
+In the image, electrical components are marked with red ID numbers.
+Your goal is to identify these components, their values, and their directions.
+
+Output your findings as a Python list of dictionaries. Each dictionary in the list represents one component.
+Strictly adhere to the following format for each dictionary:
+[
+  {
+    "id": "string_id_from_image",
+    "class": "component_class_name",
+    "value": "component_value_string_or_null",
+    "direction": "component_direction_string_or_None"
+  }
+  // ... more components can follow
+]
+
+Example of a single component entry:
+{
+    "id": "1",
+    "class": "voltage.ac",
+    "value": "10:30",
+    "direction": "None"
+}
+{
+    "id": "2",
+    "class": "resistor",
+    "value": "10k",
+    "direction": "None"
+}
+
+
+Key Instructions for each field in the dictionary:
+
+1.  **`id` (String):**
+    *   This MUST be the red number shown next to the component in the image.
+    *   The value for 'id' MUST be a STRING (e.g., "1", "12", "27").
+
+2.  **`class` (String):**
+    *   Use ONLY the class names provided as keys in the 'Component Classes and Descriptions' section below (e.g., 'resistor', 'voltage.ac').
+    *   Do not invent new class names.
+
+3.  **`value` (String or null/None):**
+    *   If a numerical value is present:
+        *   Represent it as a STRING.
+        *   Include metric prefixes directly attached to the number if present (e.g., "10k", "2.2M", "100m", "0.5u", "22n", "47p"). NO SPACE between number and prefix.
+        *   Do NOT include the base unit (like Ω, F, V, A). Just the number and prefix.
+        *   For AC voltage sources (`voltage.ac`), if a phasor is given, format the value string as "magnitude:angle_in_degrees" (e.g., "120:30" for 120V at 30 degrees, "10:0").
+        *   For complex impedance values (e.g., for capacitors or inductors if given in ohms), use the format "R+jX" or "R-jX" as a string (e.g., "5+j3.14", "100-j50").
+    *   If the value is a variable name or an expression (e.g., "V_in", "R_load", "X1", "35*V_2"), use that variable name or expression as a STRING.
+    *   If no value is explicitly written next to the component on the schematic, or if it's unclear (e.g., a question mark "?"), the value MUST be `null` (if generating JSON) or `None` (if generating a Python literal string).
+
+4.  **`direction` (String):**
+    *   Use one of the strings: "up", "down", "left", "right".
+    *   If no direction applies to the component type (as per its description below), or if it's not specified, use the string "None".
+    *   Refer to the 'Component Classes and Descriptions' for guidance on direction for each component type.
+
+General Instructions:
+
+*   Identify ONLY the components that have a clear red ID number next to them.
+*   The 'id' in your output dictionary MUST correspond to this red number.
+*   If a component in the image is ambiguous, its ID is unclear, or it cannot be confidently classified using the provided list, DO NOT include it in the output list.
+*   Ensure the entire output is a valid Python list of dictionaries string, parsable by `ast.literal_eval`, or a valid JSON array of objects.
+
+Component Classes and Descriptions:
+""" + str(components_dict)
 
 
 def load_classes() -> dict:
