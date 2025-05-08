@@ -1,3 +1,21 @@
+
+
+/* Hide Streamlit header */
+.stAppHeader {
+    display: none !important;
+}
+
+/* Hide Streamlit header decoration */
+.stDecoration {
+    display: none !important;
+}
+
+/* Hide Streamlit toolbar */
+.stToolbar {
+    display: none !important;
+}
+
+
 /* Style for Streamlit expander (dropdown) - General */
 div[data-testid="stExpander"] {
     background-color: #f8f9fa; /* A very light gray for the expander content area */
@@ -11,15 +29,12 @@ div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
     background-color: #e9ecef; /* Slightly darker gray for the header */
     padding: 8px 12px;
     border-radius: 4px 4px 0 0; /* Round top corners */
-    /* border-bottom: 1px solid #d0d0d0; */ /* Optional: a slightly darker border for header bottom */
 }
 
 /* Remove default Streamlit border from the header as we manage it */
 div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:first-child {
     border-bottom: none; 
 }
-
-/* Custom styling for the Detailed Timings expander will be added below */
 
 /* Detailed Timings Expander - Custom Styling */
 .detailed-timings-expander div[data-testid="stExpander"] {
@@ -30,7 +45,6 @@ div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:first-child 
 .detailed-timings-expander div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
     background-color: #c9f7d5; /* Slightly darker green for the header */
     color: #004d00; /* Dark green text for contrast */
-    /* border-bottom: 1px solid #a3d9b1; */ /* Optional: border for header bottom */
 }
 
 /* Custom Loader CSS */
