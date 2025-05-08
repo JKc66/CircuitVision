@@ -1058,37 +1058,67 @@ class CircuitAnalyzer():
                     current_value_in_netlist_line = line_from_gen_netlist.get('value') # Initially the string "None"
                     vlm_provided_value = vlm_item.get('value') # Value from Gemini, e.g., "2k" or Python None
 
+                    # Potentially override vlm_provided_value if it's problematic for an independent source
+                    effective_vlm_value = vlm_provided_value
+                    # Check the component_type *after* potential update from VLM class below
+                    # We need to know the final intended type of the component.
+                    
+                    # Store original class and type before VLM override for comparison
+                    original_yolo_class = line_from_gen_netlist.get('class')
+                    original_component_type = line_from_gen_netlist.get('component_type')
+                    
+                    vlm_class = vlm_item.get('class')
+                    prospective_component_type = self.netlist_map.get(vlm_class, 'UN') # Get component type based on VLM's class
+
+                    if prospective_component_type in ['V', 'I']: # Independent V or I source based on VLM's classification
+                        if isinstance(vlm_provided_value, str):
+                            try:
+                                float(vlm_provided_value) # Check if it's a number string
+                                # If successful, it's a numeric string, so it's a valid value.
+                            except ValueError:
+                                # It's a string but not a simple number.
+                                # If it's purely alphabetical (e.g., "ia") and not 'ac' (valid for AC sources), treat as invalid.
+                                if vlm_provided_value.isalpha() and vlm_provided_value.lower() != 'ac':
+                                    if self.debug:
+                                        print(f"Debug fix_netlist: Independent source type {prospective_component_type} "
+                                              f"derived from VLM class {vlm_class} with problematic alpha value '{vlm_provided_value}'. Setting effective value to None.")
+                                    effective_vlm_value = None
+                    
                     if self.debug:
                         print(f"Debug fix_netlist: comp_uid={target_persistent_uid}, visual_id={visual_id_for_this_component}, vlm_item_id={vlm_item.get('id')}")
                         print(f"Debug fix_netlist: current_value_in_netlist_line='{current_value_in_netlist_line}' (type: {type(current_value_in_netlist_line)})")
                         print(f"Debug fix_netlist: vlm_provided_value='{vlm_provided_value}' (type: {type(vlm_provided_value)})")
+                        print(f"Debug fix_netlist: prospective_component_type='{prospective_component_type}', effective_vlm_value='{effective_vlm_value}' (type: {type(effective_vlm_value)})")
 
                     if current_value_in_netlist_line is None or str(current_value_in_netlist_line).strip().lower() == 'none':
-                        line_from_gen_netlist['value'] = vlm_provided_value
+                        line_from_gen_netlist['value'] = effective_vlm_value # Use potentially modified value
                         if self.debug:
                             print(f"Debug fix_netlist: Value UPDATED to '{line_from_gen_netlist.get('value')}' (type: {type(line_from_gen_netlist.get('value'))})")
+                    # If current value was not None, but our new logic sets effective_vlm_value to None (for problematic V/I sources), we should update
+                    elif effective_vlm_value is None and \
+                         prospective_component_type in ['V', 'I'] and \
+                         (current_value_in_netlist_line is not None and str(current_value_in_netlist_line).strip().lower() != 'none'):
+                        line_from_gen_netlist['value'] = None
+                        if self.debug:
+                            print(f"Debug fix_netlist: Value OVERRIDDEN to None for {prospective_component_type} "
+                                  f"due to problematic VLM value '{vlm_provided_value}'. Original line value: '{current_value_in_netlist_line}'")
                     else:
                         if self.debug:
                             print(f"Debug fix_netlist: Value NOT updated, current_value_in_netlist_line was '{current_value_in_netlist_line}'")
 
-                    vlm_class = vlm_item.get('class')
-                    if line_from_gen_netlist.get('class') != vlm_class:
+                    # Update class and component_type based on VLM, this should happen *after* value check related to prospective_component_type
+                    if original_yolo_class != vlm_class: # Compare with original YOLO class
                         if self.debug:
                             print(f"Fixing Netlist: Component with p_uid {target_persistent_uid} (VisualID {visual_id_for_this_component}). "
-                                  f"Original YOLO class: {line_from_gen_netlist.get('class')}, "
+                                  f"Original YOLO class: {original_yolo_class}, "
                                   f"VLM class: {vlm_class}")
                         
-                        original_netlist_class = line_from_gen_netlist.get('class')
                         line_from_gen_netlist['class'] = vlm_class
-                        line_from_gen_netlist['component_type'] = self.netlist_map.get(vlm_class, 'UN')
+                        line_from_gen_netlist['component_type'] = prospective_component_type # Use the already determined type
                         
                         # Recalculate component_num if the component_type prefix changes
                         # or if the class changes significantly.
-                        # This needs to be robust. Let's assume generate_netlist_from_nodes sets initial sensible numbers.
-                        # If class changes, we might need to re-evaluate its number based on the new class.
-                        # For example, if R1 becomes C1.
-                        # The logic from previous iteration for component_num update:
-                        if self.netlist_map.get(original_netlist_class, 'UN') != self.netlist_map.get(vlm_class, 'UN') or original_netlist_class != vlm_class :
+                        if original_component_type != prospective_component_type or original_yolo_class != vlm_class :
                             new_class_component_numbers = []
                             for l_other in netlist:
                                 if l_other.get('persistent_uid') != target_persistent_uid and l_other.get('class') == vlm_class:
