@@ -798,7 +798,7 @@ if uploaded_file is not None:
             # Show Gemini input in a dropdown
             with st.expander("🔍 Debug Gemini Input"):
                 if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
-                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini (potentially cropped and enumerated)")
+                    st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini")
         
         # Step 4: SPICE Analysis - keep as is
         if st.session_state.active_results.get('netlist_text') is not None:
