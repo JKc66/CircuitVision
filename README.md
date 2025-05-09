@@ -2,7 +2,7 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align='center'>
-  <a href="https://app.jawadk.me/circuits/"><img alt="Demo" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" /></a>
+  <a target="_blank" href="https://app.jawadk.me/circuits/"><img alt="Demo" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" /></a>
   &nbsp;
 </p>
 <br />
