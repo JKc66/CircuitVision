@@ -1,8 +1,25 @@
-<p align='center'>
-  <a target="_blank" href="https://app.jawadk.me/circuits/"><img alt="Demo" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" /></a>
-  &nbsp;
+
+<p align="center">
+  <img width="40%" src="static/css/CircuitVision.png" />
 </p>
-<br />
+
+<p align="center">
+  <a href="https://app.jawadk.me/circuits/" target="_blank">
+    <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
+  </a>
+  <a href="https://github.com/JKc66/SDP_demo/blob/main/LICENSE" target="_blank">
+    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/SDP_demo?style=for-the-badge" />
+  </a>
+  <a href="https://github.com/JKc66/SDP_demo/issues">
+    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/SDP_demo?style=for-the-badge" />
+  </a>
+  <a href="https://github.com/mah-sam">
+    <img alt="Mahmoud" src="https://img.shields.io/badge/Mahmoud-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
+  </a>
+  <a href="https://github.com/JKc66">
+    <img alt="Jawad" src="https://img.shields.io/badge/Jawad-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
+  </a>
+</p>
 
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
