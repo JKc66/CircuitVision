@@ -30,8 +30,8 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 
 ## ✨ Key Features & The Engineering Behind Them
 
-### 👁️ Advanced Component Detection (Fine-Tuned YOLOv8)
-*   **High-Accuracy Detection:** Utilizes a **YOLOv8 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images.
+### 👁️ Advanced Component Detection (Fine-Tuned YOLOv11)
+*   **High-Accuracy Detection:** Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images.
 *   **Intelligent Filtering:** Employs Non-Maximum Suppression (NMS) based on confidence scores to eliminate redundant detections, ensuring a clean and precise component map.
 *   **Dynamic Adaptation:** Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
 
@@ -61,7 +61,7 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 
 ## 📈 Our Development Journey & Enhancements
 CircuitVision is the culmination of significant research and development in applying and adapting cutting-edge AI to the specialized domain of **electrical circuit analysis**. We've moved beyond off-the-shelf model usage to:
-*   **Model Fine-Tuning:** Extensive work was done to **fine-tune YOLOv8** on specific **electrical circuit datasets** to maximize component recognition accuracy.
+*   **Model Fine-Tuning:** Extensive work was done to **fine-tune YOLOv11** on specific **electrical circuit datasets** to maximize component recognition accuracy.
 *   **SAM 2 Adaptation:** We've **custom-adapted the application of SAM 2** for optimal circuit segmentation, leading to the intelligent cropping feature which is key to downstream accuracy.
 *   **Algorithm Development:** The node analysis and corner detection algorithms are **custom-built** for the unique challenges of **electrical circuit diagrams**.
 *   **Multi-Model Orchestration:** Integrating YOLO, SAM 2, and Gemini into a cohesive and efficient pipeline represents a complex engineering achievement.
