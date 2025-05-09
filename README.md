@@ -7,11 +7,9 @@
 <p align="center">
   <a href="https://app.jawadk.me/circuits/" target="_blank">
     <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
-  </a>
   <a href="https://github.com/JKc66/SDP_demo/blob/main/LICENSE" target="_blank">
-  <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/SDP_demo?style=for-the-badge" />
-  </a>  
-
+  <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/SDP_demo?style=for-the-badge&cacheBust=2" />
+</a>
   <a href="https://github.com/JKc66/SDP_demo/issues">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/SDP_demo?style=for-the-badge" />
   </a>
