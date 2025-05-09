@@ -1,6 +1,8 @@
 
 static/uploads
 
+.env 
+
 # models:
 *.pth
 *.pt
