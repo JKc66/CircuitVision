@@ -58,6 +58,10 @@ def load_css(file_name):
 
 # Function to auto-rotate image based on EXIF orientation tag
 def auto_rotate_image(image_path):
+    """
+    Opens an image, checks for EXIF orientation tag, and rotates the image accordingly.
+    Returns the rotated PIL Image object, or the original if no rotation is needed/possible.
+    """
     try:
         image = Image.open(image_path)
         exif = image._getexif()
@@ -69,12 +73,11 @@ def auto_rotate_image(image_path):
         orientation = exif[0x0112]
         logger.info(f"Auto-rotating image with orientation tag: {orientation}")
         
-        # Apply rotation based on orientation
         rotated_image = ImageOps.exif_transpose(image)
         return rotated_image
     except Exception as e:
         logger.error(f"Error auto-rotating image: {str(e)}")
-        return Image.open(image_path)  # Return original on error
+        return Image.open(image_path)
 
 # Function to format EXIF data for better display
 def format_value(value):
@@ -87,6 +90,10 @@ def format_value(value):
     return value
 
 def format_exif_data(image_path):
+    """
+    Extracts and formats key EXIF data from an image for display.
+    Returns a dictionary of important EXIF tags or None if no data is found.
+    """
     try:
         img = Image.open(image_path)
         
@@ -96,7 +103,6 @@ def format_exif_data(image_path):
             'Orientation'
         }
         
-        # Get EXIF data
         exif_data = {}
         try:
             exif = img._getexif()
@@ -272,7 +278,7 @@ else:
 example_image_paths = [item['img'] for item in carousel_items]
 example_image_captions = [item['title'] for item in carousel_items]
 
-
+# Define columns for layout, making the central one wider for the image selector
 col1, col2, col3 = st.columns([1,3,1]) 
 
 with col2: # Display image_select in the central column
@@ -286,17 +292,21 @@ with col2: # Display image_select in the central column
         key="example_image_selector" # Add a key for robust state handling
     )
 
-if selected_image_path: # An image is selected/displayed in the component
+# Special placeholder path used to initialize 'last_processed_image_path' on the very first app load.
+# This ensures that the first default image selected by image_select will be different from this dummy path,
+# thereby triggering its analysis when the main comparison logic runs.
+DUMMY_INITIAL_STATE_PATH = "INTERNAL_DUMMY_INITIAL_STATE_FOR_EXAMPLES"
+
+if selected_image_path: # An image is selected/displayed in the image_select component
     if not st.session_state.app_has_loaded_once:
-        # First script run for the app.
-        # Record the default selection from image_select as the "last processed"
-        # to prevent auto-analysis, but don't actually process it.
-        # This check ensures we only do this if last_processed_image_path is still in its initial None state
-        # for the very first assignment from the default image_select value.
+        # This block runs only on the very first script execution for the user session.
+        # Initialize 'last_processed_image_path' to our dummy constant.
         if st.session_state.last_processed_image_path is None:
-             st.session_state.last_processed_image_path = selected_image_path
-        logger.info(f"App first load: Default image '{selected_image_path}' noted. Analysis will not run automatically for this.")
-        # IMPORTANT: No st.rerun() here, no analysis trigger.
+             st.session_state.last_processed_image_path = DUMMY_INITIAL_STATE_PATH
+        # Log that the default image from image_select has been noted. Its path (selected_image_path)
+        # will be different from DUMMY_INITIAL_STATE_PATH, causing the main analysis trigger logic to run for it.
+        logger.info(f"App first load: Default image '{selected_image_path}' noted. Initializing last_processed_image_path to dummy value to ensure analysis runs.")
+        # No st.rerun() or direct analysis trigger here; the standard flow below will handle it.
     else:
         # Not the first app load. Check if the selection is new compared to what was last processed.
         if selected_image_path != st.session_state.last_processed_image_path:
