@@ -7,13 +7,13 @@
 <p align="center">
   <a href="https://app.jawadk.me/circuits/" target="_blank">
     <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
-  <a href="https://github.com/JKc66/SDP_demo/blob/main/LICENSE" target="_blank">
-  <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/SDP_demo?style=for-the-badge&cacheBust=2" />
+  <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
+  <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?style=for-the-badge&cacheBust=2" />
 </a>
 
 
-  <a href="https://github.com/JKc66/SDP_demo/issues">
-    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/SDP_demo?style=for-the-badge" />
+  <a href="https://github.com/JKc66/CircuitVision/issues">
+    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision?style=for-the-badge" />
   </a>
 </p>
 <p align="center">
@@ -26,17 +26,19 @@
 </p>
 
 ## 📚 Table of Contents
-- [🚀 Overview](#-overview)
-- [✨ Key Features & The Engineering Behind Them](#-key-features--the-engineering-behind-them)
-  - [👁️ Advanced Component Detection (Fine-Tuned YOLOv11)](#️-advanced-component-detection-fine-tuned-yolov11)
-  - [📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)](#-precise-circuit-segmentation--intelligent-cropping-adapted-sam-2)
-  - [🔗 Custom-Developed Node & Connection Analysis](#-custom-developed-node--connection-analysis)
-  - [📝 Automated & Enriched Netlist Generation](#-automated--enriched-netlist-generation)
-  - [🖥️ Intuitive User Interface & Rich Visualization](#️-intuitive-user-interface--rich-visualization)
-- [📈 Our Development Journey & Enhancements](#-our-development-journey--enhancements)
-- [🛠️ Setup](#️-setup)
-  - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
-- [🚀 Usage](#-usage)
+- [CircuitVision: AI-Powered Electrical Circuit Analysis \& Netlist Generation](#circuitvision-ai-powered-electrical-circuit-analysis--netlist-generation)
+  - [📚 Table of Contents](#-table-of-contents)
+  - [🚀 Overview](#-overview)
+  - [✨ Key Features \& The Engineering Behind Them](#-key-features--the-engineering-behind-them)
+    - [👁️ Advanced Component Detection (Fine-Tuned YOLOv11)](#️-advanced-component-detection-fine-tuned-yolov11)
+    - [📐 Precise Circuit Segmentation \& Intelligent Cropping (Adapted SAM 2)](#-precise-circuit-segmentation--intelligent-cropping-adapted-sam-2)
+    - [🔗 Custom-Developed Node \& Connection Analysis](#-custom-developed-node--connection-analysis)
+    - [📝 Automated \& Enriched Netlist Generation](#-automated--enriched-netlist-generation)
+    - [🖥️ Intuitive User Interface \& Rich Visualization](#️-intuitive-user-interface--rich-visualization)
+  - [📈 Our Development Journey \& Enhancements](#-our-development-journey--enhancements)
+  - [🛠️ Setup](#️-setup)
+    - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
+  - [🚀 Usage](#-usage)
 
 ## 🚀 Overview
 
