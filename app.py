@@ -39,6 +39,7 @@ logger.info(f"Initializing Circuit Analyzer with log level: {log_level}")
 # Reduce verbosity of httpcore and openai loggers
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+logging.getLogger("groq._base_client").setLevel(logging.WARNING)
 logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
 logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("PIL.TiffImagePlugin").setLevel(logging.WARNING)
@@ -246,6 +247,8 @@ if 'start_analysis_triggered' not in st.session_state:
 # Add new session state variable after the other session state declarations (around line 236)
 if 'final_netlist_generated' not in st.session_state:
     st.session_state.final_netlist_generated = False
+if 'editable_netlist_content' not in st.session_state:
+    st.session_state.editable_netlist_content = None
 
 # Session state for handling initial default image selection
 if 'app_has_loaded_once' not in st.session_state:
@@ -372,7 +375,7 @@ if selected_image_path: # An image is selected/displayed in the image_select com
                 process_this_example = True
                 log_message = f"Processing example '{selected_image_path}' as it's new for processing (last non-upload processed was '{st.session_state.last_processed_image_path}')."
             elif last_processed_was_an_upload:
-                logger.info(f"Example '{selected_image_path}' not automatically processed because last processed item was an upload ('{st.session_state.last_processed_image_path}'). Widget selection for example did not change.")
+                logger.info(f"Example '{selected_image_path}' not automatically processed because last processed item was an upload ('{st.session_state.last_processed_image_path}').")
             # If last_processed_was_an_upload is False, AND selected_image_path == st.session_state.last_processed_image_path,
             # then this example was the last non-upload thing processed, so do nothing unless widget_selection_changed.
 
@@ -563,6 +566,41 @@ if st.session_state.get('start_analysis_triggered', False):
                     st.stop() # Stop further execution in this problematic state
                 detailed_timings['YOLO Component Detection'] = time.time() - step_start_time_yolo
 
+                # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
+                # This step should happen after initial YOLO bbox detection and NMS,
+                # using the bboxes in original image coordinates (bboxes_orig_coords_nms)
+                # and the original image (st.session_state.active_results['original_image'], which should be RGB).
+                can_enrich = (
+                    st.session_state.active_results.get('bboxes_orig_coords_nms') and
+                    st.session_state.active_results.get('original_image') is not None and
+                    hasattr(analyzer, 'groq_client') and analyzer.groq_client # Check if attr exists and then its truthiness
+                )
+                if can_enrich:
+                    logger.info("Attempting to enrich component bboxes with semantic directions from LLaMA...")
+                    step_start_time_llama_enrich = time.time()
+                    try:
+                        # The _enrich_bboxes_with_directions method modifies bboxes_orig_coords_nms in-place.
+                        # These bboxes (now potentially with 'semantic_direction') will then be used in cropping
+                        # and the 'semantic_direction' attribute should be preserved by deepcopy in crop_image_and_adjust_bboxes.
+                        analyzer._enrich_bboxes_with_directions(
+                            st.session_state.active_results['original_image'],
+                            st.session_state.active_results['bboxes_orig_coords_nms']
+                        )
+                        logger.info("Semantic direction enrichment step completed.")
+                        detailed_timings['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich
+                    except Exception as e_enrich:
+                        logger.error(f"Error during LLaMA semantic direction enrichment: {e_enrich}")
+                        st.warning("Could not determine semantic directions for some components using LLaMA.")
+                        detailed_timings['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich # Log time even on failure
+                # If enrichment couldn't happen, log a warning if the basic prerequisites were met but groq_client was the issue.
+                elif (
+                    st.session_state.active_results.get('bboxes_orig_coords_nms') and
+                    st.session_state.active_results.get('original_image') is not None
+                ):
+                    # This implies can_enrich was false, and since bboxes & image are present, 
+                    # it was likely due to groq_client issues (either not an attribute or evaluates to False).
+                    logger.warning("Skipping LLaMA semantic direction enrichment: Groq client not available, analyzer instance might be outdated, or GROQ_API_KEY missing.")
+
                 # Step 1B: SAM2 Segmentation (on original image) & Get SAM2 Extent
                 step_start_time_sam = time.time()
                 full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = None, None, None
@@ -670,7 +708,26 @@ if st.session_state.get('start_analysis_triggered', False):
                         st.session_state.active_results['netlist'] = valueless_netlist
                         st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
                         st.session_state.active_results['netlist_text'] = valueless_netlist_text
+                        st.session_state.editable_netlist_content = valueless_netlist_text
                         
+                        # --- BEGIN: Generate initial netlist WITHOUT LLaMA directions for comparison ---
+                        try:
+                            logger.debug("Generating initial netlist WITHOUT LLaMA directions for comparison...")
+                            nodes_copy_for_no_llama = deepcopy(st.session_state.active_results['nodes'])
+                            for node_data in nodes_copy_for_no_llama:
+                                for component_in_node in node_data.get('components', []):
+                                    # Neutralize semantic_direction to force default ordering
+                                    component_in_node['semantic_direction'] = "UNKNOWN" # or None
+                            
+                            valueless_netlist_no_llama_dir = analyzer.generate_netlist_from_nodes(nodes_copy_for_no_llama)
+                            valueless_netlist_text_no_llama_dir = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist_no_llama_dir])
+                            st.session_state.active_results['valueless_netlist_text_no_llama_dir'] = valueless_netlist_text_no_llama_dir
+                            logger.debug(f"Generated initial netlist WITHOUT LLaMA directions: {len(valueless_netlist_no_llama_dir)} components")
+                        except Exception as e_no_llama:
+                            logger.error(f"Error generating netlist without LLaMA directions: {e_no_llama}")
+                            st.session_state.active_results['valueless_netlist_text_no_llama_dir'] = "Error generating this version."
+                        # --- END: Generate initial netlist WITHOUT LLaMA directions ---
+
                         logger.debug("Enumerating components for later Gemini labeling on (potentially cropped) image_for_analysis...")
                         enum_img, bbox_ids_with_visual_enum = analyzer.enumerate_components(
                             image_for_analysis, # This is the potentially SAM2-extent cropped visual image
@@ -840,6 +897,24 @@ if st.session_state.active_results['original_image'] is not None:
                     
                     if stats_data:
                         st.table(stats_data)
+            
+            # Expander for LLaMA Stage 1 (Direction) Debug Output
+            with st.expander("Debug: LLaMA Directions"):
+                if 'bboxes' in st.session_state.active_results and st.session_state.active_results['bboxes']:
+                    directions_data = []
+                    for comp_bbox in st.session_state.active_results['bboxes']:
+                        if 'semantic_direction' in comp_bbox and comp_bbox['semantic_direction'] is not None:
+                            directions_data.append({
+                                "Persistent UID": comp_bbox.get('persistent_uid', 'N/A'),
+                                "YOLO Class": comp_bbox.get('class', 'N/A'),
+                                "Semantic Direction": comp_bbox['semantic_direction']
+                            })
+                    if directions_data:
+                        st.table(directions_data)
+                    else:
+                        st.info("No semantic directions were determined or available in the processed bboxes.")
+                else:
+                    st.info("Processed component bounding boxes ('bboxes') not available in session state.")
         
         else:
             st.info("Run analysis to see component detection")
@@ -918,6 +993,7 @@ if st.session_state.active_results['original_image'] is not None:
                     gemini_info = gemini_labels_openrouter(enum_img) 
                     logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
                     logger.info(f"GEMINI BARE OUTPUT (gemini_info): {gemini_info}")
+                    st.session_state.active_results['vlm_stage2_output'] = gemini_info # Store for debugging
                     # fix_netlist will correlate gemini_info (using visual enum 'id') 
                     # with netlist lines (via persistent_uid found in bbox_ids_for_fix)
                     analyzer.fix_netlist(netlist, gemini_info, bbox_ids_for_fix)
@@ -941,6 +1017,7 @@ if st.session_state.active_results['original_image'] is not None:
                 # Store the results
                 st.session_state.active_results['netlist'] = netlist
                 st.session_state.active_results['netlist_text'] = netlist_text
+                st.session_state.editable_netlist_content = netlist_text
                 
                 # Calculate and store the final netlist generation time
                 final_elapsed_time = time.time() - final_start_time
@@ -960,44 +1037,95 @@ if st.session_state.active_results['original_image'] is not None:
                 st.error(f"Error generating final netlist: {str(e)}")
                 logger.error(f"Error generating final netlist: {str(e)}")
         
-        # Display netlists in columns
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### Initial Netlist")
+        # Main netlist display: Initial (LLaMA) and Final side-by-side
+        col1_main_netlist, col2_main_netlist = st.columns(2)
+        with col1_main_netlist:
+            st.markdown("### Initial Netlist") # (This is with LLaMA directions)
             if 'valueless_netlist_text' in st.session_state.active_results:
-                st.code(st.session_state.active_results['valueless_netlist_text'], language="python")
-        
-        with col2:
-            st.markdown("### Final Netlist")
-            if st.session_state.final_netlist_generated:
-                st.code(st.session_state.active_results['netlist_text'], language="python")
+                st.code(st.session_state.active_results['valueless_netlist_text'], language="rust")
             else:
-                st.info("Click 'Get Final Netlist' to generate the final netlist with component values")
+                st.info("Initial netlist not available.")
+
+        with col2_main_netlist:
+            st.markdown("### Final Netlist") # (After VLM Stage 2)
+            if st.session_state.final_netlist_generated and 'netlist_text' in st.session_state.active_results:
+                # MODIFIED: Use st.code for displaying the final netlist
+                st.code(st.session_state.active_results['netlist_text'], language="rust")
+            elif not st.session_state.final_netlist_generated:
+                st.info("Click 'Get Final Netlist' button above to generate.")
+            else:
+                st.info("Final netlist not available.")
         
-        # Show Gemini input in a dropdown
-        with st.expander("🔍 Debug Gemini Input"):
-            if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
-                st.image(st.session_state.active_results['enum_img'], caption="Image sent to Gemini")
+        # Dropdown 1: Image Sent to Gemini/VLM
+        with st.expander("🔍 Image Sent to VLM"):
+            if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img' ] is not None:
+                st.image(st.session_state.active_results['enum_img'], caption="Image sent for VLM Stage 2 analysis")
+            else:
+                st.info("Enumerated image for VLM not available.")
+
+        # Dropdown 2: Differences in Initial Netlists (if any)
+        netlist_llama_text = st.session_state.active_results.get('valueless_netlist_text')
+        netlist_no_llama_text = st.session_state.active_results.get('valueless_netlist_text_no_llama_dir')
+        has_llama = netlist_llama_text is not None
+        has_no_llama = netlist_no_llama_text is not None
+        are_different_initials = False
+        if has_llama and has_no_llama and netlist_llama_text != netlist_no_llama_text:
+            are_different_initials = True
+        
+        if are_different_initials:
+            with st.expander("🔍 Differences in Initial Netlists (LLaMA vs. No LLaMA)"):
+                st.markdown("Details of Differences:")
+                lines_llama = netlist_llama_text.splitlines()
+                lines_no_llama = netlist_no_llama_text.splitlines()
+                num_lines_llama = len(lines_llama)
+                num_lines_no_llama = len(lines_no_llama)
+                max_l = max(num_lines_llama, num_lines_no_llama)
+                
+                any_line_diff_shown = False
+                for i in range(max_l):
+                    line_l_content = lines_llama[i] if i < num_lines_llama else None
+                    line_nl_content = lines_no_llama[i] if i < num_lines_no_llama else None
+
+                    if line_l_content != line_nl_content:
+                        any_line_diff_shown = True
+                        st.markdown(f"**Line {i+1}:**")
+                        if line_l_content is not None:
+                            st.markdown(f"  - With LLaMA:    `{line_l_content}`")
+                        else:
+                            st.markdown(f"  - With LLaMA:    *Line not present*")
+                        
+                        if line_nl_content is not None:
+                            st.markdown(f"  - Without LLaMA: `{line_nl_content}`")
+                        else:
+                            st.markdown(f"  - Without LLaMA: *Line not present*")
+                        st.markdown("") # Add a little space
+
+                if not any_line_diff_shown:
+                    st.markdown("The netlists are marked as different, but no specific line-by-line variances were rendered. This could be due to subtle differences like trailing whitespace. The initial netlist (with LLaMA) is shown above.")
+        
     
     # Step 4: SPICE Analysis - keep as is
     if st.session_state.active_results.get('netlist_text') is not None:
         st.markdown("## ⚡ SPICE Analysis")
         if st.button("Run SPICE Analysis"):
             try:
-                net_text = '.title detected_circuit\n' + st.session_state.active_results['netlist_text']
-                parser = SpiceParser(source=net_text)
-                bootstrap_circuit = parser.build_circuit()
-                simulator = bootstrap_circuit.simulator()
-                analysis = simulator.operating_point()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("### Node Voltages")
-                    st.json(analysis.nodes)
-                with col2:
-                    st.markdown("### Branch Currents")
-                    st.json(analysis.branches)
+                # MODIFIED: Use editable_netlist_content for SPICE analysis
+                if st.session_state.editable_netlist_content:
+                    net_text = '.title detected_circuit\\n' + st.session_state.editable_netlist_content
+                    parser = SpiceParser(source=net_text)
+                    bootstrap_circuit = parser.build_circuit()
+                    simulator = bootstrap_circuit.simulator()
+                    analysis = simulator.operating_point()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("### Node Voltages")
+                        st.json(analysis.nodes)
+                    with col2:
+                        st.markdown("### Branch Currents")
+                        st.json(analysis.branches)
+                else:
+                    st.error("Netlist is empty. Please generate or edit the netlist before running SPICE analysis.")
             
             except Exception as e:
                 error_msg = f"❌ SPICE Analysis Error: {str(e)}"

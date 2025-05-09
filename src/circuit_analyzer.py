@@ -24,6 +24,19 @@ from .sam2_infer import (
     device as sam2_device
 )
 
+# +++ Imports for Groq/LLaMA Direction Analysis +++
+import base64
+import io
+from PIL import Image as PILImage # Alias to avoid conflict with cv2.Image
+from dotenv import load_dotenv
+from groq import Groq
+import time
+import json # For parsing LLaMA JSON output
+
+# Load environment variables (e.g., for GROQ_API_KEY)
+load_dotenv()
+# --- End Imports for Groq/LLaMA ---
+
 class CircuitAnalyzer():
     def __init__(self, yolo_path='models/YOLO/best_large_model_yolo.pt', 
                  sam2_config_path='models/configs/sam2.1_hiera_l.yaml',
@@ -93,6 +106,33 @@ class CircuitAnalyzer():
         self.sam2_model = None
         self.sam2_transforms = None
         self.sam2_device = None
+
+        # +++ Component types for semantic direction analysis +++
+        # These are string names. The numeric IDs will be used in the enrichment function.
+        self.yolo_class_names_map = self.yolo.model.names # Get mapping from class ID to name from YOLO model
+        self.classes_of_interest_names = {
+            'voltage.dc', 'voltage.ac', 'voltage.battery', 
+            'diode', 'diode.light_emitting', 'diode.zener',
+            'transistor.bjt', 
+            'unknown' 
+        }
+        self.voltage_classes_names = {'voltage.dc', 'voltage.ac', 'voltage.battery', 'transistor.bjt', 'unknown'}
+        self.diode_classes_names = {'diode', 'diode.light_emitting', 'diode.zener'}
+        self.current_source_classes_names = {'current.dc', 'current.dependent'}
+        # --- End component types ---
+
+        # +++ Groq Client Initialization +++
+        self.groq_client = None
+        if os.getenv("GROQ_API_KEY"):
+            try:
+                self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+                if self.debug:
+                    print("Groq client initialized successfully.")
+            except Exception as e:
+                print(f"Failed to initialize Groq client: {e}")
+        elif self.debug:
+            print("GROQ_API_KEY not found, semantic direction analysis via LLaMA will be disabled.")
+        # ---
 
         if self.use_sam2:
             try:
@@ -215,19 +255,24 @@ class CircuitAnalyzer():
     def bboxes(self, image):
         results = self.yolo.predict(image, verbose=True)
         results = results[0]
-        img_classes = results.boxes.cls.cpu().numpy().tolist()
-        img_classes = [results.names[int(num)] for num in img_classes]
+        img_classes_ids = results.boxes.cls.cpu().numpy().tolist() # Get numeric class IDs
+        img_classes_names = [results.names[int(num_id)] for num_id in img_classes_ids] # Get string names
         confidences = results.boxes.conf.cpu().numpy().tolist()
-        boxes = results.boxes.xyxy.cpu().numpy().tolist()
-        boxes = [{'class': img_classes[i], 
-                  'confidence': confidences[i], 
-                  'xmin': round(xmin), 
-                  'ymin': round(ymin), 
-                  'xmax': round(xmax), 
-                  'ymax': round(ymax), 
-                  'persistent_uid': f"{img_classes[i]}_{round(xmin)}_{round(ymin)}_{round(xmax)}_{round(ymax)}"} 
-                 for i, (xmin, ymin, xmax, ymax) in enumerate(boxes)]
-        return boxes
+        boxes_coords = results.boxes.xyxy.cpu().numpy().tolist()
+        
+        processed_boxes = []
+        for i, (xmin, ymin, xmax, ymax) in enumerate(boxes_coords):
+            processed_boxes.append({
+                'class': img_classes_names[i],
+                '_yolo_class_id_temp': int(img_classes_ids[i]), # Store numeric ID temporarily
+                'confidence': confidences[i],
+                'xmin': round(xmin),
+                'ymin': round(ymin),
+                'xmax': round(xmax),
+                'ymax': round(ymax),
+                'persistent_uid': f"{img_classes_names[i]}_{round(xmin)}_{round(ymin)}_{round(xmax)}_{round(ymax)}"
+            })
+        return processed_boxes
 
     def enhance_lines(self, image):
         """
@@ -827,10 +872,10 @@ class CircuitAnalyzer():
                     
                     # is_point_near_bbox expects bbox_comp_proc_resized (already in resized system)
                     if self.is_point_near_bbox(point, bbox_comp_proc_resized, pixel_threshold=6):
-                        # IMPORTANT: Store the component from bboxes_relative_to_mask (original scale of the cropped image),
-                        # using the index `i` from the enumerated processing_bboxes_resized.
-                        # This ensures persistent_uid and correct coordinates for fix_netlist are stored.
-                        target_bbox_to_add = deepcopy(bboxes_relative_to_mask[i])
+                        # IMPORTANT: Store the component from processing_bboxes_resized to align coordinate systems
+                        # for geometric reasoning with node contours. persistent_uid and semantic_direction
+                        # should have been copied by resize_bboxes.
+                        target_bbox_to_add = deepcopy(processing_bboxes_resized[i])
                         
                         component_unique_ref = target_bbox_to_add.get('persistent_uid')
                         # Fallback if persistent_uid is somehow missing (should not happen with current crop logic)
@@ -957,126 +1002,145 @@ class CircuitAnalyzer():
         component_counters = {component_type: 1 for component_type in set(self.netlist_map.values()) if component_type}
         processed_components = set()
         
-        def get_component_id(component_type):
-            component_id = f"{component_type}{component_counters[component_type]}"
-            component_counters[component_type] += 1
-            return component_id
-            
-        # First, find source components and their node connections
-        source_nodes = {}  # Maps nodes to their relationship with sources (positive/negative)
-        source_positive_node = None
-        
-        # First pass - find source and its positive node
-        for n in node_list:
-            node_components = n['components']
-            node_index = n['id']
-            for component in node_components:
-                if component.get('class') in ['source', 'vdd']:
-                    component_position = (component['xmin'], component['ymin'], component['xmax'], component['ymax'])
-                    if component_position not in processed_components:
-                        processed_components.add(component_position)
-                        
-                        # Find the other node this source is connected to
-                        other_node = None
-                        for other_index, other_components in enumerate(node_list):
-                            if other_index != node_index:
-                                if any(c['xmin'] == component['xmin'] and 
-                                      c['ymin'] == component['ymin'] and 
-                                      c['xmax'] == component['xmax'] and 
-                                      c['ymax'] == component['ymax'] for c in other_components):
-                                    other_node = other_index
-                                    break
-                        
-                        if other_node is not None:
-                            # The higher y-coordinate terminal is negative (connects to ground/node 0)
-                            if component['ymax'] > component['ymin']:
-                                source_positive_node = node_index
-                            else:
-                                source_positive_node = other_node
-        
-        # Reset processed components for main pass
-        processed_components.clear()
+        # Create a quick lookup for node centroids
+        # The contours are in the same space as the component bboxes stored in node_list[i]['components']
+        # due to changes in get_node_connections.
+        node_centroids = {}
+        for node_data in node_list:
+            node_id = node_data['id']
+            contour = node_data.get('contour')
+            if contour is not None and len(contour) > 0:
+                M = cv2.moments(contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    node_centroids[node_id] = (cx, cy)
+                else:
+                    # Fallback if moment is zero, though unlikely for valid contours
+                    # Use the first point of the contour or a default
+                    node_centroids[node_id] = tuple(contour[0][0]) if len(contour[0]) > 0 else (0,0)
+            else:
+                # Fallback if no contour, though all valid nodes should have one
+                node_centroids[node_id] = None 
+                if self.debug:
+                    print(f"Warning: Node {node_id} has no contour for centroid calculation.")
+
+        # Removed old first pass for source_positive_node
         
         # Process components
-        for n in node_list:
-            node_components = n['components']
-            node_index = n['id']
-            node_id = node_index
+        for n_idx, n_data in enumerate(node_list):
+            node_components = n_data['components']
+            current_node_id = n_data['id']
             
             for component in node_components:
                 component_class = component.get('class')
-                component_position = (component['xmin'], component['ymin'], component['xmax'], component['ymax'])
-                
-                if self.debug:
-                    print(f"Debug generate_netlist: Processing component for line update: {component}")
-                    if 'persistent_uid' not in component:
-                        print(f"Debug generate_netlist: persistent_uid MISSING from component dict before update: {component}")
+                # Bbox for this component is already in the same space as node contours
+                component_bbox = {
+                    'xmin': component['xmin'], 'ymin': component['ymin'],
+                    'xmax': component['xmax'], 'ymax': component['ymax']
+                }
+                component_semantic_direction = component.get('semantic_direction', 'UNKNOWN')
+                persistent_uid = component.get('persistent_uid')
 
-                if component_class in ['text', 'explanatory', 'junction', 'crossover', 'terminal'] or component_position in processed_components:
+                if not persistent_uid: # Should always have this
+                    if self.debug: print(f"Warning: Component {component_class} missing persistent_uid. Skipping.")
+                    continue
+
+                # Check if component should be skipped
+                is_ignorable_class = component_class in ['text', 'explanatory', 'junction', 'crossover', 'terminal']
+                is_already_processed = persistent_uid in processed_components
+                if is_ignorable_class or is_already_processed:
                     continue
                     
-                processed_components.add(component_position)
-                component_type = self.netlist_map.get(component_class, 'UN')
+                processed_components.add(persistent_uid)
+                component_type_prefix = self.netlist_map.get(component_class, 'UN')
                 
-                if not component_type:
+                if not component_type_prefix:
                     continue
                     
-                component_id = get_component_id(component_type)
-                
                 # Find the other node this component is connected to
-                other_node = None
-                for n2 in node_list:
-                    other_components = n2['components']
-                    other_index = n2['id']
-                    
-                    if other_index != node_index:
-                        if any(c['xmin'] == component['xmin'] and 
-                              c['ymin'] == component['ymin'] and 
-                              c['xmax'] == component['xmax'] and 
-                              c['ymax'] == component['ymax'] for c in other_components):
-                            other_node = other_index
+                other_node_id = None
+                for other_n_data in node_list:
+                    if other_n_data['id'] != current_node_id:
+                        # Check against persistent_uid as components are deepcopied
+                        if any(c.get('persistent_uid') == persistent_uid for c in other_n_data['components']):
+                            other_node_id = other_n_data['id']
                             break
                             
-                if other_node is None:
+                if other_node_id is None:
                     if self.debug:
-                        print(f"Warning: Could not find second node for component {component_id}")
+                        print(f"Warning: Could not find second node for component UID {persistent_uid} ({component_class}). Skipping.")
                     continue
                 
-                value = "None"  # Placeholder value
-                
-                component['id'] = id_count
-                id_count += 1
-                
-                node_1, node_2 = node_id, other_node
-                
-                # For source components
-                if component_class in ['source', 'vdd']:
-                    # Always put positive node first, node 0 second
-                    if source_positive_node == node_id:
-                        node_1, node_2 = node_id, 0
-                    else:
-                        node_1, node_2 = other_node, 0
-                elif component_class in ['gnd', 'vss']:
-                    # Ground always connects to 0 second
-                    node_1, node_2 = node_id, 0
+                # Get centroids for the connected nodes
+                current_node_centroid = node_centroids.get(current_node_id)
+                other_node_centroid = node_centroids.get(other_node_id)
+
+                if current_node_centroid is None or other_node_centroid is None:
+                    if self.debug:
+                        print(f"Warning: Missing centroid for one of the nodes ({current_node_id}, {other_node_id}) connected to UID {persistent_uid}. Using arbitrary node order.")
+                    # Fallback: use original IDs, no directed assignment possible
+                    assigned_node1_id, assigned_node2_id = current_node_id, other_node_id
                 else:
-                    # For other components
-                    # If either node is 0, make sure it's second
-                    if node_1 == 0:
-                        node_1, node_2 = node_2, node_1
-                    elif node_2 == 0:
-                        pass  # node 0 is already second
-                    # Otherwise, try to maintain current flow direction
-                    elif node_1 == source_positive_node or node_2 == source_positive_node:
-                        if node_2 == source_positive_node:
-                            node_1, node_2 = node_2, node_1
+                    # Determine primary and secondary nodes using semantic direction
+                    # The component_bbox is already in the same coordinate space as centroids.
+                    primary_centroid, secondary_centroid = self._get_terminal_nodes_relative_to_bbox(
+                        component_bbox, 
+                        component_semantic_direction, 
+                        current_node_centroid, 
+                        other_node_centroid, 
+                        component_class
+                    )
+                    
+                    # Map back from centroids to original node IDs
+                    if primary_centroid == current_node_centroid:
+                        assigned_node1_id, assigned_node2_id = current_node_id, other_node_id
+                    else:
+                        assigned_node1_id, assigned_node2_id = other_node_id, current_node_id
+
+                # Grounding and final node assignment
+                # If it's a ground component, one node must be 0.
+                if component_class in ['gnd', 'vss']:
+                    # The non-ground node is assigned_node1_id (or assigned_node2_id if it was the primary one)
+                    # The other one becomes 0.
+                    if assigned_node1_id == 0: # Should not happen if 0 is not a normal node ID
+                         true_node = assigned_node2_id
+                    else:
+                         true_node = assigned_node1_id # Assume this is the actual connection point
+                    node_1, node_2 = true_node, 0
+                elif assigned_node1_id == 0: # If primary directed node is ground
+                    node_1, node_2 = assigned_node2_id, 0
+                elif assigned_node2_id == 0: # If secondary directed node is ground
+                    node_1, node_2 = assigned_node1_id, 0
+                else:
+                    node_1, node_2 = assigned_node1_id, assigned_node2_id
                 
-                line = {'component_type': component_type,
-                       'component_num': component_counters[component_type]-1,
-                       'node_1': node_1,
-                       'node_2': node_2,
-                       'value': value}
-                line.update(component)
+                # For AC sources, value might be complex (e.g. "10V:30deg"), handle later by Gemini.
+                # For DC sources, value could be simple voltage.
+                value = "None"  # Placeholder value, to be filled by fix_netlist using Gemini
+                
+                # Get unique component ID (R1, C1, etc.)
+                if component_type_prefix not in component_counters:
+                     component_counters[component_type_prefix] = 1 # Should be pre-initialized, but as a safeguard
+                comp_num = component_counters[component_type_prefix]
+                component_counters[component_type_prefix] += 1
+                # component_full_id = f"{component_type_prefix}{comp_num}" # This is just for logging/debug if needed
+                
+                line = {
+                    'component_type': component_type_prefix,
+                    'component_num': comp_num,
+                    'node_1': node_1,
+                    'node_2': node_2,
+                    'value': value
+                }
+                # Add all original component fields (class, semantic_direction, persistent_uid, original bbox, etc.)
+                # from the component dict that was processed (which is in contour space).
+                # The original `component` dict already has these.
+                line.update(deepcopy(component)) 
+                # Ensure xmin, ymin etc. are not overwritten if present in component by line.update(component)
+                # by ensuring component_bbox fields are not in `line` before update, or handle carefully.
+                # For now, component dict has xmin,ymin (in contour space) and other important fields.
+                
                 if self.debug and 'persistent_uid' not in line:
                     print(f"Debug generate_netlist: persistent_uid MISSING from line dict AFTER update. Original component was: {component}")
                 netlist.append(line)
@@ -1194,3 +1258,235 @@ class CircuitAnalyzer():
         if netlist_line.get('class') == 'gnd':
             return ""  # Ground components don't have a direct SPICE line; their nodes become '0'
         return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
+
+    def _encode_image_for_llama(self, img_array_rgb):
+        """Convert numpy array (RGB) to base64 encoded image for LLaMA."""
+        img_pil = PILImage.fromarray(img_array_rgb)
+        img_byte_arr = io.BytesIO()
+        img_pil.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        return base64.b64encode(img_byte_arr).decode('utf-8')
+
+    def _get_terminal_nodes_relative_to_bbox(self, component_bbox, semantic_direction, 
+                                             node1_centroid, node2_centroid, component_class_name):
+        """
+        Determines which node centroid corresponds to the primary terminal of a component 
+        based on its semantic direction and bounding box.
+
+        Args:
+            component_bbox (dict): The component's bounding box {'xmin', 'ymin', 'xmax', 'ymax'}
+                                   in the same coordinate system as node centroids.
+            semantic_direction (str): "UP", "DOWN", "LEFT", "RIGHT", or "UNKNOWN".
+            node1_centroid (tuple): (x, y) coordinates of the first connected node's centroid.
+            node2_centroid (tuple): (x, y) coordinates of the second connected node's centroid.
+            component_class_name (str): The class name (e.g., 'voltage.dc', 'diode').
+
+        Returns:
+            tuple: (primary_node_centroid, secondary_node_centroid) if direction is clear,
+                   else (node1_centroid, node2_centroid) as a fallback (e.g., for UNKNOWN direction).
+                   For voltage/current sources: primary is positive/source-from.
+                   For diodes: primary is anode.
+        """
+        if not node1_centroid or not node2_centroid:
+            # Should not happen if nodes are valid
+            return node1_centroid, node2_centroid 
+
+        xmin, ymin, xmax, ymax = component_bbox['xmin'], component_bbox['ymin'], component_bbox['xmax'], component_bbox['ymax']
+        center_x, center_y = (xmin + xmax) / 2, (ymin + ymax) / 2
+        width, height = xmax - xmin, ymax - ymin
+
+        ref_point = None
+        is_diode = component_class_name in self.diode_classes_names
+        is_voltage_source = component_class_name in self.voltage_classes_names # Covers V, Battery, Dep. V
+        is_current_source = component_class_name in self.current_source_classes_names # Covers I, Dep. I
+
+        # Determine the reference point on the component symbol that represents the "primary" terminal
+        # For voltage sources, this is the positive (+) terminal.
+        # For current sources, this is where current flows FROM.
+        # For diodes, this is the ANODE (base of the triangle).
+        if semantic_direction == "UP":
+            if is_voltage_source: ref_point = (center_x, ymax)      # + is at bottom
+            elif is_current_source: ref_point = (center_x, ymax)   # Arrow from bottom
+            elif is_diode: ref_point = (center_x, ymax)           # Anode at bottom
+        elif semantic_direction == "DOWN":
+            if is_voltage_source: ref_point = (center_x, ymin)      # + is at top
+            elif is_current_source: ref_point = (center_x, ymin)   # Arrow from top
+            elif is_diode: ref_point = (center_x, ymin)           # Anode at top
+        elif semantic_direction == "LEFT":
+            if is_voltage_source: ref_point = (xmax, center_y)      # + is at right
+            elif is_current_source: ref_point = (xmax, center_y)   # Arrow from right
+            elif is_diode: ref_point = (xmax, center_y)           # Anode at right
+        elif semantic_direction == "RIGHT":
+            if is_voltage_source: ref_point = (xmin, center_y)      # + is at left
+            elif is_current_source: ref_point = (xmin, center_y)   # Arrow from left
+            elif is_diode: ref_point = (xmin, center_y)           # Anode at left
+        
+        if ref_point is None or semantic_direction == "UNKNOWN":
+            if self.debug and semantic_direction != "UNKNOWN":
+                 print(f"Warning: Could not determine ref_point for {component_class_name} with direction {semantic_direction}. Using default node order.")
+            # Fallback: no clear direction or not a type we reorder this way, return original order
+            return node1_centroid, node2_centroid
+
+        # Calculate squared Euclidean distances to avoid sqrt
+        dist1_sq = (node1_centroid[0] - ref_point[0])**2 + (node1_centroid[1] - ref_point[1])**2
+        dist2_sq = (node2_centroid[0] - ref_point[0])**2 + (node2_centroid[1] - ref_point[1])**2
+
+        if dist1_sq < dist2_sq:
+            return node1_centroid, node2_centroid # Node1 is closer to the primary terminal reference
+        else:
+            return node2_centroid, node1_centroid # Node2 is closer
+
+    def _get_semantic_direction_from_llama(self, component_crop_rgb, component_class_name):
+        """
+        Analyzes a component crop with LLaMA via Groq to determine its direction.
+        'component_class_name' is the string name like 'voltage.dc'.
+        """
+        if not self.groq_client:
+            if self.debug:
+                print("Groq client not available. Skipping LLaMA direction analysis.")
+            return None
+
+        base64_image = self._encode_image_for_llama(component_crop_rgb)
+        prompt = None
+        model_to_use = "meta-llama/llama-4-scout-17b-16e-instruct" 
+
+        if component_class_name in self.voltage_classes_names:
+            prompt = """Analyze this voltage source image.
+Return a JSON object with these fields:
+- symbol_positions: describe where + and - symbols are located or if arrow return NONE
+- direction: UP/DOWN/LEFT/RIGHT based on + symbol location (if + bottom = UP,
+                                                              if + top = DOWN,
+                                                              if + left = RIGHT,
+                                                              if + right = LEFT)
+                                                              or based on the arrow direction
+"""
+        elif component_class_name in self.diode_classes_names:
+            prompt = """Analyze this diode image.
+Return a JSON object with these fields:
+- direction: UP/DOWN/LEFT/RIGHT based on the (traiangle follwed by a bar) (where its pointing towards)
+"""
+        else:
+            if self.debug:
+                print(f"No specific LLaMA prompt for component class: {component_class_name}. Skipping LLaMA.")
+            return None # Not a component type we analyze for direction with LLaMA with these prompts
+
+        try:
+            if self.debug:
+                print(f"Querying LLaMA ({model_to_use}) for direction of {component_class_name}...")
+            
+            llm_start_time = time.time()
+            chat_completion = self.groq_client.chat.completions.create(
+                model=model_to_use,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"}
+                            }
+                        ]
+                    }
+                ],
+                temperature=0, 
+                max_tokens=1024, 
+                top_p=1,         
+                stream=False,
+                response_format={"type": "json_object"} 
+            )
+            llm_time = time.time() - llm_start_time
+            response_content = chat_completion.choices[0].message.content
+            
+            if self.debug:
+                print(f"LLaMA response for {component_class_name} (took {llm_time:.2f}s): {response_content}")
+            
+            parsed_response = json.loads(response_content)
+            # The direction field seems to be directly the value like "UP", "DOWN" etc.
+            # Also, the prompt for voltage sources might return 'symbol_positions', 
+            # but we are primarily interested in the 'direction' field for the netlist.
+            # We will prioritize the 'direction' field if present.
+            direction = parsed_response.get("direction")
+            if direction:
+                 return str(direction).upper()
+            else:
+                if self.debug:
+                    print(f"LLaMA response for {component_class_name} did not contain a 'direction' field. Full response: {parsed_response}")
+                return "UNKNOWN" # Fallback if direction field is missing
+            
+        except Exception as e:
+            print(f"Error during LLaMA call for {component_class_name} direction: {e}")
+            return "UNKNOWN" # Fallback on error
+
+    def _enrich_bboxes_with_directions(self, image_rgb, bboxes):
+        """
+        Iterates through bboxes, and for relevant components (sources, diodes based on classes_of_interest),
+        uses LLaMA to determine semantic direction and adds it to the bbox dict.
+        Modifies bboxes in-place.
+        Assumes image_rgb is the original, full image in RGB format.
+        Uses numeric class IDs and confidence threshold from code.
+        """
+        if not self.groq_client:
+            if self.debug:
+                print("Groq client not initialized. Skipping semantic direction enrichment.")
+            return
+        
+
+        numeric_classes_of_interest = {6, 7, 8, 17, 18, 19, 29, 22} 
+        confidence_threshold = 0.4 
+
+        for bbox in bboxes:
+            yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp') # Assuming this was added during initial YOLO parsing
+            if yolo_numeric_cls_id is None:
+                 # If not present, try to find it by matching string class name back to ID
+                 # This is less ideal but a fallback.
+                string_class_name_for_id_lookup = bbox.get('class')
+                for num_id, name_str in self.yolo_class_names_map.items():
+                    if name_str == string_class_name_for_id_lookup:
+                        yolo_numeric_cls_id = num_id
+                        break
+            
+            confidence = bbox.get('confidence', 0.0)
+            component_string_class_name = bbox.get('class') # String name like 'voltage.dc'
+
+            if yolo_numeric_cls_id is not None and \
+               yolo_numeric_cls_id in numeric_classes_of_interest and \
+               confidence >= confidence_threshold and \
+               component_string_class_name is not None and \
+               component_string_class_name in self.classes_of_interest_names:
+                
+                # Crop the component from the original image
+                xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
+                xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+                
+                # Ensure crop coordinates are valid
+                h, w = image_rgb.shape[:2]
+                crop_xmin = max(0, xmin)
+                crop_ymin = max(0, ymin)
+                crop_xmax = min(w, xmax)
+                crop_ymax = min(h, ymax)
+
+                if crop_xmin >= crop_xmax or crop_ymin >= crop_ymax:
+                    if self.debug:
+                        print(f"Skipping LLaMA for {component_string_class_name} due to invalid crop dimensions: {bbox}")
+                    bbox['semantic_direction'] = 'UNKNOWN'
+                    continue
+
+                component_crop_rgb = image_rgb[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+                
+                if component_crop_rgb.size == 0:
+                    if self.debug:
+                        print(f"Skipping LLaMA for {component_string_class_name} due to empty crop: {bbox}")
+                    bbox['semantic_direction'] = 'UNKNOWN'
+                    continue
+
+                # Get semantic direction from LLaMA
+                # Pass the string class name for prompt selection logic inside the helper
+                direction = self._get_semantic_direction_from_llama(component_crop_rgb, component_string_class_name)
+                bbox['semantic_direction'] = direction if direction else "UNKNOWN"
+                if self.debug:
+                    print(f"Component {bbox.get('persistent_uid', '')} class {component_string_class_name} got semantic_direction: {bbox['semantic_direction']}")
+            else:
+                # For components not analyzed for direction, set a default or skip
+                bbox['semantic_direction'] = None
+        # No explicit return, bboxes list is modified in-place.
