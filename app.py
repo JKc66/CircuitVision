@@ -20,6 +20,11 @@ from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from streamlit_image_select import image_select
 
+# Special placeholder path used to initialize 'last_value_from_image_select_widget' on the very first app load.
+# This ensures that the first default image selected by image_select will be different from this dummy path,
+# thereby triggering its analysis when the main comparison logic runs.
+DUMMY_INITIAL_STATE_PATH = "INTERNAL_DUMMY_INITIAL_STATE_FOR_EXAMPLES"
+
 # Configure logging
 # Get log level from environment or default to DEBUG
 log_level = os.environ.get('LOG_LEVEL', 'DEBUG').upper()
@@ -36,6 +41,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
 logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+logging.getLogger("PIL.TiffImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
 torch.classes.__path__ = []
@@ -245,7 +251,13 @@ if 'final_netlist_generated' not in st.session_state:
 if 'app_has_loaded_once' not in st.session_state:
     st.session_state.app_has_loaded_once = False
 if 'last_processed_image_path' not in st.session_state:
-    st.session_state.last_processed_image_path = None
+    st.session_state.last_processed_image_path = DUMMY_INITIAL_STATE_PATH # Initialize to DUMMY
+if 'last_value_from_image_select_widget' not in st.session_state:
+    st.session_state.last_value_from_image_select_widget = DUMMY_INITIAL_STATE_PATH # Initialize to DUMMY
+
+# Session state for tracking cleared uploads
+if 'last_known_uploaded_file_name' not in st.session_state:
+    st.session_state.last_known_uploaded_file_name = None
 
 # Define carousel items
 carousel_items = [
@@ -265,6 +277,15 @@ carousel_items = [
 # Main content  
 st.image("static/images/sdp_banner.png", use_container_width=True)
 
+# File upload section (MOVED EARLIER)
+file_upload_container = st.container()
+with file_upload_container:
+    uploaded_file = st.file_uploader(
+        "Drag and drop your circuit diagram here (or select an example below)",
+        type=['png', 'jpg', 'jpeg'],
+        help="For best results, use a clear image"
+    )
+
 # Show SAM2 status
 if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
     if not st.session_state.get('model_load_toast_shown', False):
@@ -274,14 +295,13 @@ else:
     # This warning is appropriate to show if the condition persists (e.g. SAM2 files missing)
     st.warning("⚠️ Model loading failed")
 
-# Prepare lists for image_select
-example_image_paths = [item['img'] for item in carousel_items]
-example_image_captions = [item['title'] for item in carousel_items]
+# Sidebar for Example Selection
+with st.sidebar:
+    st.markdown("## Example Circuits")
+    # Prepare lists for image_select (moved into sidebar context)
+    example_image_paths = [item['img'] for item in carousel_items]
+    example_image_captions = [item['title'] for item in carousel_items]
 
-# Define columns for layout, making the central one wider for the image selector
-col1, col2, col3 = st.columns([1,3,1]) 
-
-with col2: # Display image_select in the central column
     selected_image_path = image_select(
         label="Select an example circuit diagram:",
         images=example_image_paths,
@@ -292,79 +312,123 @@ with col2: # Display image_select in the central column
         key="example_image_selector" # Add a key for robust state handling
     )
 
-# Special placeholder path used to initialize 'last_processed_image_path' on the very first app load.
-# This ensures that the first default image selected by image_select will be different from this dummy path,
-# thereby triggering its analysis when the main comparison logic runs.
-DUMMY_INITIAL_STATE_PATH = "INTERNAL_DUMMY_INITIAL_STATE_FOR_EXAMPLES"
+# Detect if an upload was just cleared to prevent immediate example auto-analysis
+# This logic now correctly placed AFTER uploaded_file is defined and image_select is shown
+upload_was_just_cleared = False
+if st.session_state.get('last_known_uploaded_file_name') is not None and uploaded_file is None:
+    logger.info(f"Upload '{st.session_state.last_known_uploaded_file_name}' was cleared by user.")
+    upload_was_just_cleared = True
+    if selected_image_path:  # current selection in the image_select widget
+        st.session_state.last_processed_image_path = selected_image_path
+        st.session_state.last_value_from_image_select_widget = selected_image_path
+    # Also clear any pending analysis trigger that might have been for the upload
+    if st.session_state.active_results.get('uploaded_file_name') == st.session_state.last_known_uploaded_file_name:
+        st.session_state.start_analysis_triggered = False
+        st.session_state.analysis_in_progress = False
+
+# Update last_known_uploaded_file_name based on current state of uploaded_file
+if uploaded_file is not None:
+    st.session_state.last_known_uploaded_file_name = uploaded_file.name
+else:
+    st.session_state.last_known_uploaded_file_name = None
+
+example_took_precedence_this_run = False # Initialize flag
 
 if selected_image_path: # An image is selected/displayed in the image_select component
-    if not st.session_state.app_has_loaded_once:
-        # This block runs only on the very first script execution for the user session.
-        # Initialize 'last_processed_image_path' to our dummy constant.
-        if st.session_state.last_processed_image_path is None:
-             st.session_state.last_processed_image_path = DUMMY_INITIAL_STATE_PATH
-        # Log that the default image from image_select has been noted. Its path (selected_image_path)
-        # will be different from DUMMY_INITIAL_STATE_PATH, causing the main analysis trigger logic to run for it.
-        logger.info(f"App first load: Default image '{selected_image_path}' noted. Initializing last_processed_image_path to dummy value to ensure analysis runs.")
-        # No st.rerun() or direct analysis trigger here; the standard flow below will handle it.
+    process_this_example = False
+    log_message = ""
+
+    if upload_was_just_cleared:
+        logger.info("Upload cleared, suppressing example auto-analysis this cycle.")
+        process_this_example = False
+    elif not st.session_state.app_has_loaded_once:
+        # First script run. Do not auto-process.selected_image_path is the default from image_select.
+        logger.info(f"App first load: Default example '{selected_image_path}' displayed. No auto-analysis initiated.")
+        # last_processed_image_path remains DUMMY_INITIAL_STATE_PATH from initialization.
+        # last_value_from_image_select_widget will be updated to selected_image_path at the end of this block.
     else:
-        # Not the first app load. Check if the selection is new compared to what was last processed.
-        if selected_image_path != st.session_state.last_processed_image_path:
-            logger.info(f"User selected new example image: '{selected_image_path}' (was '{st.session_state.last_processed_image_path}')")
+        # Not the first script run, and upload was not just cleared.
+        widget_selection_changed = (selected_image_path != st.session_state.last_value_from_image_select_widget)
+
+        if widget_selection_changed:
+            # User explicitly selected a different image in the widget.
+            process_this_example = True
+            log_message = f"User selected new example via widget: '{selected_image_path}' (widget previously showed '{st.session_state.last_value_from_image_select_widget}'). Triggering analysis."
+        else: # Widget selection did not change.
+            # Determine if the example should be processed because it's genuinely new for processing,
+            # and not just because the last_processed_image_path was an upload.
+            last_processed_was_an_upload = False
+            if st.session_state.last_processed_image_path and \
+               isinstance(st.session_state.last_processed_image_path, str) and \
+               UPLOAD_DIR in st.session_state.last_processed_image_path:
+                last_processed_was_an_upload = True
             
-            st.session_state.last_processed_image_path = selected_image_path # Update to current selection
-            st.session_state.previous_upload_name = None # Clear previous upload name to ensure it's treated as new
+            if not last_processed_was_an_upload and selected_image_path != st.session_state.last_processed_image_path:
+                # Process if: 
+                # 1. Last processed item was NOT an upload.
+                # 2. AND current example path is different from last_processed_image_path.
+                # This handles the first click on the default example (after DUMMY_INITIAL_STATE_PATH),
+                # or re-selecting an example if the previous thing processed was also a (different) example.
+                process_this_example = True
+                log_message = f"Processing example '{selected_image_path}' as it's new for processing (last non-upload processed was '{st.session_state.last_processed_image_path}')."
+            elif last_processed_was_an_upload:
+                logger.info(f"Example '{selected_image_path}' not automatically processed because last processed item was an upload ('{st.session_state.last_processed_image_path}'). Widget selection for example did not change.")
+            # If last_processed_was_an_upload is False, AND selected_image_path == st.session_state.last_processed_image_path,
+            # then this example was the last non-upload thing processed, so do nothing unless widget_selection_changed.
 
-            image_path_to_process = selected_image_path
-            logger.info("="*80)
-            logger.info(f"PROCESSING EXAMPLE IMAGE: {image_path_to_process}")
-            logger.info("="*80)
+    if process_this_example:
+        example_took_precedence_this_run = True # Set the flag if an example is chosen for processing
+        logger.info(log_message)
+        logger.info("="*80)
+        logger.info(f"PROCESSING EXAMPLE IMAGE: {selected_image_path}")
+        logger.info("="*80)
 
-            try:
-                pil_image = Image.open(image_path_to_process).convert('RGB')
-                image_data = np.array(pil_image)
+        try:
+            pil_image = Image.open(selected_image_path).convert('RGB')
+            image_data = np.array(pil_image)
 
-                st.session_state.active_results = {
-                    'bboxes': None, 'nodes': None, 'netlist': None, 'netlist_text': None,
-                    'original_image': image_data,
-                    'uploaded_file_type': f"image/{image_path_to_process.split('.')[-1]}",
-                    'uploaded_file_name': os.path.basename(image_path_to_process),
-                    'annotated_image': None, 'component_stats': None, 'node_visualization': None,
-                    'node_mask': None, 'enhanced_mask': None, 'contour_image': None, 'corners_image': None,
-                    'sam2_output': None, 'valueless_netlist_text': None, 'enum_img': None,
-                    'detailed_timings': {},
-                    'image_path': image_path_to_process
-                }
-                st.session_state.final_netlist_generated = False
-                st.session_state.start_analysis_triggered = True
-                st.session_state.analysis_in_progress = True
-                st.rerun() # Re-adding this to align with file_uploader pattern
-            except FileNotFoundError:
-                st.error(f"Error: Example image not found at {image_path_to_process}")
-                logger.error(f"Example image not found: {image_path_to_process}")
-            except Exception as e:
-                st.error(f"Error loading example image: {str(e)}")
-                logger.error(f"Error loading example image {image_path_to_process}: {str(e)}")
-        # else: selected_image_path is the same as last_processed_image_path, do nothing.
+            # Clear previous results and set up for new example analysis
+            st.session_state.active_results = {
+                'bboxes': None, 'nodes': None, 'netlist': None, 'netlist_text': None,
+                'original_image': image_data,
+                'uploaded_file_type': f"image/{selected_image_path.split('.')[-1]}",
+                'uploaded_file_name': os.path.basename(selected_image_path),
+                'annotated_image': None, 'component_stats': None, 'node_visualization': None,
+                'node_mask': None, 'enhanced_mask': None, 'contour_image': None, 'corners_image': None,
+                'sam2_output': None, 'valueless_netlist_text': None, 'enum_img': None,
+                'detailed_timings': {},
+                'image_path': selected_image_path # Ensure image_path is for the example
+            }
+            st.session_state.final_netlist_generated = False
+            st.session_state.start_analysis_triggered = True
+            st.session_state.analysis_in_progress = True # Ensure loader shows
+            
+            # Critical: Update last_processed_image_path *now* to mark this example as being processed.
+            st.session_state.last_processed_image_path = selected_image_path
+            st.session_state.previous_upload_name = None # Clear any upload context
+            
+            # No st.rerun() here, analysis block later in script will handle it.
+        except FileNotFoundError:
+            st.error(f"Error: Example image not found at {selected_image_path}")
+            logger.error(f"Example image not found: {selected_image_path}")
+        except Exception as e:
+            st.error(f"Error loading example image: {str(e)}")
+            logger.error(f"Error loading example image {selected_image_path}: {str(e)}")
+            
+    # Always update last_value_from_image_select_widget for the next run's comparison,
+    # if selected_image_path is valid (i.e., an image is selected in the widget).
+    if selected_image_path is not None:
+        st.session_state.last_value_from_image_select_widget = selected_image_path
 
-# File upload section
-file_upload_container = st.container()
-with file_upload_container:
-    uploaded_file = st.file_uploader(
-        "Drag and drop your circuit diagram here (or select an example above)",
-        type=['png', 'jpg', 'jpeg'],
-        help="For best results, use a clear image"
-    )
-
-if uploaded_file is not None:
+# Only process an upload if an example didn't take precedence AND there is an uploaded file.
+if not example_took_precedence_this_run and uploaded_file is not None:
     # Generate a consistent image path for the uploaded file
-    disk_image_path = os.path.join(UPLOAD_DIR, f'1.{uploaded_file.name.split(".")[-1]}')
+    disk_image_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
     
     # Only reset results if a new file is uploaded (different path or different name for re-upload)
     if disk_image_path != st.session_state.last_processed_image_path or \
        st.session_state.get('previous_upload_name') != uploaded_file.name:
         
-        # st.session_state.previous_selected_image_path = None # This can be removed
         st.session_state.previous_upload_name = uploaded_file.name # Keep this for re-upload detection
         st.session_state.last_processed_image_path = disk_image_path # Update last processed path
 
@@ -397,7 +461,7 @@ if uploaded_file is not None:
             'sam2_output': None,
             'valueless_netlist_text': None,
             'enum_img': None,
-            'detailed_timings': {}, # Added for detailed timings
+            'detailed_timings': {}, 
             'image_path': disk_image_path  # Store the image path in session state
         }
         
@@ -443,16 +507,6 @@ if uploaded_file is not None:
         # Automatically trigger analysis
         st.session_state.start_analysis_triggered = True
         st.session_state.analysis_in_progress = True
-        st.rerun()  # Force immediate rerun to start analysis
-    else:
-        # If it's the same file, just ensure we have the image loaded
-        if st.session_state.active_results['original_image'] is None:
-            file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            st.session_state.active_results['original_image'] = image
-    # End of the 'if uploaded_file is not None:' block's specific file loading/handling logic.
-    # The analysis block below is now unindented and will run if 'start_analysis_triggered' is true.
 
 # Analysis logic, executed if triggered
 if st.session_state.get('start_analysis_triggered', False):
@@ -539,7 +593,7 @@ if st.session_state.get('start_analysis_triggered', False):
                         st.session_state.active_results['original_image'],
                         st.session_state.active_results['bboxes_orig_coords_nms'],
                         sam_extent_bbox,
-                        padding=65 # Added some padding
+                        padding=80 # Added some padding
                     )
                     if crop_details_returned:
                         image_for_analysis = cropped_visual_image
