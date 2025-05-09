@@ -1,3 +1,4 @@
+# CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align="center">
   <img width="40%" src="static/css/CircuitVision.png" />
@@ -20,8 +21,6 @@
     <img alt="Jawad" src="https://img.shields.io/badge/Jawad-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
   </a>
 </p>
-
-# CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 ## 🚀 Overview
 
