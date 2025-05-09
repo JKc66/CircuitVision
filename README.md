@@ -1,6 +1,12 @@
 
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
+<p align='center'>
+  <a href="https://app.jawadk.me/circuits/"><img alt="Demo" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" /></a>
+  &nbsp;
+</p>
+<br />
+
 ## 🚀 Overview
 
 CircuitVision is an innovative application designed to bridge the gap between visual **electrical circuit** diagrams and functional simulations. It intelligently analyzes images of **electrical circuits**—whether hand-drawn, photographed, or from schematics—and transforms them into SPICE-compatible netlists, providing an easy access to the operating point parameters of the circuit. This project leverages a sophisticated pipeline of **fine-tuned and custom-adapted AI models**, including **YOLOv11** for component detection, an **adapted SAM 2 (Segment Anything Model 2)** for precise segmentation and intelligent cropping, and **Google's Gemini** for its robust OCR ability.
