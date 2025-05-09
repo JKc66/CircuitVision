@@ -1,7 +1,7 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align="center">
-  <img width="40%" src="static/css/CircuitVision.png" />
+  <img width="40%" src="static/images/CircuitVision.png" />
 </p>
 
 <p align="center">
@@ -14,6 +14,8 @@
   <a href="https://github.com/JKc66/SDP_demo/issues">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/SDP_demo?style=for-the-badge" />
   </a>
+</p>
+<p align="center">
   <a href="https://github.com/mah-sam">
     <img alt="Mahmoud" src="https://img.shields.io/badge/Mahmoud-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
   </a>
@@ -21,6 +23,19 @@
     <img alt="Jawad" src="https://img.shields.io/badge/Jawad-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
   </a>
 </p>
+
+## 📚 Table of Contents
+- [🚀 Overview](#-overview)
+- [✨ Key Features & The Engineering Behind Them](#-key-features--the-engineering-behind-them)
+  - [👁️ Advanced Component Detection (Fine-Tuned YOLOv11)](#️-advanced-component-detection-fine-tuned-yolov11)
+  - [📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)](#-precise-circuit-segmentation--intelligent-cropping-adapted-sam-2)
+  - [🔗 Custom-Developed Node & Connection Analysis](#-custom-developed-node--connection-analysis)
+  - [📝 Automated & Enriched Netlist Generation](#-automated--enriched-netlist-generation)
+  - [🖥️ Intuitive User Interface & Rich Visualization](#️-intuitive-user-interface--rich-visualization)
+- [📈 Our Development Journey & Enhancements](#-our-development-journey--enhancements)
+- [🛠️ Setup](#️-setup)
+  - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
+- [🚀 Usage](#-usage)
 
 ## 🚀 Overview
 
@@ -31,33 +46,33 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 ## ✨ Key Features & The Engineering Behind Them
 
 ### 👁️ Advanced Component Detection (Fine-Tuned YOLOv11)
-*   **High-Accuracy Detection:** Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images.
-*   **Intelligent Filtering:** Employs Non-Maximum Suppression (NMS) based on confidence scores to eliminate redundant detections, ensuring a clean and precise component map.
-*   **Dynamic Adaptation:** Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
+* Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images.
+* Employs Non-Maximum Suppression (NMS) based on confidence scores to eliminate redundant detections, ensuring a clean and precise component map.
+* Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
 
 ### 📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)
-*   **Granular Segmentation:** Integrates an **adapted Segment Anything Model 2 (SAM 2)**. We've tailored its application to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background.
-*   **Focus & Efficiency:** The input image and the SAM 2 binary mask are intelligently cropped based on the segmented circuit's extent (with optimal padding). This crucial step focuses all subsequent analyses (node detection, value extraction) solely on the relevant circuit area, significantly boosting performance and reducing noise.
-*   **Robust Fallback:** In scenarios where SAM 2 processing is unavailable or disabled, the system gracefully defaults to analyzing the original, uncropped image.
+* Integrates an **adapted Segment Anything Model 2 (SAM 2)**. We've tailored its application to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background.
+* The input image and the SAM 2 binary mask are intelligently cropped based on the segmented circuit's extent (with optimal padding). This crucial step focuses all subsequent analyses (node detection, value extraction) solely on the relevant circuit area, significantly boosting performance and reducing noise.
+* In scenarios where SAM 2 processing is unavailable or disabled, the system gracefully defaults to analyzing the original, uncropped image.
 
 ### 🔗 Custom-Developed Node & Connection Analysis
-*   **Mask-Driven Precision:** Our **custom-developed node connection algorithm** leverages the SAM 2-generated binary mask (after excluding component areas) and the adjusted YOLO bounding boxes. This allows for superior precision in identifying conductive traces and connection nodes within the **electrical circuit**.
-*   **Advanced Corner Detection:** Features a **newly implemented pixel-based corner finding algorithm**, replacing previous methods for enhanced robustness and accuracy across diverse circuit image styles and qualities. Includes comprehensive fallback mechanisms and empty coordinate checks.
+* Our **custom-developed node connection algorithm** leverages the SAM 2-generated binary mask (after excluding component areas) and the adjusted YOLO bounding boxes. This allows for superior precision in identifying conductive traces and connection nodes within the **electrical circuit**.
+* Features a **newly implemented pixel-based corner finding algorithm**, replacing previous methods for enhanced robustness and accuracy across diverse circuit image styles and qualities. Includes comprehensive fallback mechanisms and empty coordinate checks.
 
 ### 📝 Automated & Enriched Netlist Generation
-*   **Two-Stage Intelligent Process:**
+* **Two-Stage Intelligent Process:**
     1.  **Structural Netlist:** An initial "valueless" netlist is generated based on the detected components (from fine-tuned YOLO) and their geometric interconnections (from custom node analysis).
     2.  **Gemini-Powered Value & Type Enrichment:** An enumerated image, clearly marking each detected component with a unique ID, is passed to the **Gemini Pro Vision model**. Gemini then performs advanced OCR and contextual understanding to accurately identify component types (Resistors, Capacitors, Voltage/Current Sources, etc.) and extract their corresponding values (e.g., 10kΩ, 100µF, 12V). This step also serves as a cross-validation for component types initially detected by YOLO.
-*   **SPICE-Ready Output:** The final netlist is meticulously filtered to remove invalid or incomplete entries, ensuring a clean, reliable, and simulation-ready output for SPICE-based tools.
+* **SPICE-Ready Output:** The final netlist is meticulously filtered to remove invalid or incomplete entries, ensuring a clean, reliable, and simulation-ready output for SPICE-based tools.
 
 ### 🖥️ Intuitive User Interface & Rich Visualization
-*   **Streamlined Workflow:** Analysis is automatically triggered upon image upload, with a custom loading animation providing real-time feedback.
-*   **Comprehensive Results Dashboard:**
+* **Streamlined Workflow:** Analysis is automatically triggered upon image upload, with a custom loading animation providing real-time feedback.
+* **Comprehensive Results Dashboard:**
     *   Visualize each critical step: annotated component detections (YOLO), SAM 2 segmentation masks, identified node connections.
     *   Detailed performance timings for each major analysis stage (YOLO, SAM 2, Cropping, Node Analysis, Netlist Generation).
     *   Display of original image properties and extracted EXIF data for traceability.
-*   **Intelligent Preprocessing:** Images are automatically rotated based on EXIF orientation data before any analysis begins.
-*   **Debugging & Transparency:** Dedicated expander sections reveal intermediate debug images, including the enumerated image sent to Gemini, providing insight into the AI's "reasoning."
+* **Intelligent Preprocessing:** Images are automatically rotated based on EXIF orientation data before any analysis begins.
+* **Debugging & Transparency:** Dedicated expander sections reveal intermediate debug images, including the enumerated image sent to Gemini, providing insight into the AI's "reasoning."
 
 ## 📈 Our Development Journey & Enhancements
 CircuitVision is the culmination of significant research and development in applying and adapting cutting-edge AI to the specialized domain of **electrical circuit analysis**. We've moved beyond off-the-shelf model usage to:
