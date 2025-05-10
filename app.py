@@ -20,6 +20,7 @@ from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from PySpice.Unit import *
 from PySpice.Unit import u_Hz
+from PySpice.Unit.Unit import UnitValue
 import re
 import matplotlib.pyplot as plt
 
@@ -1302,59 +1303,105 @@ if st.session_state.active_results['original_image'] is not None:
                                     number_of_points=1
                                 )
                                 
-                                logger.debug("Raw AC analysis results:")
-                                logger.debug("Nodes:")
-                                for node, value_waveform in analysis_ac.nodes.items():
-                                    # For single point AC, waveform has 1 complex value
-                                    complex_val = value_waveform[0] if len(value_waveform) > 0 else complex(0,0)
-                                    logger.debug(f"  {node}: {complex_val} (type: {type(complex_val)})")
-                                logger.debug("Branches:")
-                                for branch, value_waveform in analysis_ac.branches.items():
-                                    complex_val = value_waveform[0] if len(value_waveform) > 0 else complex(0,0)
-                                    logger.debug(f"  {branch}: {complex_val} (type: {type(complex_val)})")
+                                logger.debug("--- AC Analysis Result Inspection ---")
+                                logger.debug(f"Type of analysis_ac.nodes: {type(analysis_ac.nodes)}")
 
+                                # This is the primary dictionary for displaying node voltages.
+                                # It is populated by the corrected logic below.
                                 node_voltages_ac_display = {}
                                 for node_name_ac, val_waveform_ac in analysis_ac.nodes.items():
-                                    if len(val_waveform_ac) > 0:
-                                        # Get the value and convert to complex safely
-                                        raw_value = val_waveform_ac[0]
-                                        print(f"DEBUG: Node {node_name_ac} raw value: {raw_value}, type: {type(raw_value)}")
-                                        
-                                        complex_voltage = safe_to_complex(raw_value)
-                                        print(f"DEBUG: Converted to complex: {complex_voltage}")
-                                        
-                                        # Calculate magnitude and phase
-                                        mag = np.abs(complex_voltage)
-                                        phase = np.angle(complex_voltage, deg=True)
-                                        node_voltages_ac_display[str(node_name_ac)] = f"{mag:.3f} ∠ {phase:.2f}° V"
+                                    logger.debug(f"Processing Node: {node_name_ac}")
+                                    value_to_convert = None
+                                    is_value_complex_from_ndarray = False
+
+                                    if hasattr(val_waveform_ac, 'as_ndarray'):
+                                        try:
+                                            np_array_repr = val_waveform_ac.as_ndarray()
+                                            logger.info(f"  Node {node_name_ac}: Waveform.as_ndarray() = {np_array_repr} (dtype: {np_array_repr.dtype})")
+                                            if (np_array_repr.dtype == np.complex64 or np_array_repr.dtype == np.complex128) and len(np_array_repr) > 0:
+                                                value_to_convert = np_array_repr[0]
+                                                is_value_complex_from_ndarray = True
+                                                logger.info(f"    SUCCESS: Node {node_name_ac} using complex value from ndarray: {value_to_convert}")
+                                            else:
+                                                logger.warning(f"    Node {node_name_ac}: ndarray is not complex or is empty. Dtype: {np_array_repr.dtype}, Length: {len(np_array_repr)}")
+                                        except Exception as e_np:
+                                            logger.error(f"  Node {node_name_ac}: Error inspecting as_ndarray(): {e_np}")
                                     else:
-                                        node_voltages_ac_display[str(node_name_ac)] = "Error (no data)"
-                                
+                                        logger.warning(f"  Node {node_name_ac}: Waveform has no as_ndarray attribute.")
+
+                                    if not is_value_complex_from_ndarray:
+                                        if hasattr(val_waveform_ac, '__len__') and len(val_waveform_ac) > 0:
+                                            value_to_convert = val_waveform_ac[0] # Fallback to UnitValue
+                                            logger.info(f"  Node {node_name_ac}: Falling back to raw value from waveform[0] = '{value_to_convert}' (Type: {type(value_to_convert)})")
+                                            if isinstance(value_to_convert, UnitValue):
+                                                logger.debug(f"    UnitValue Details: str={str(value_to_convert)}, .value={getattr(value_to_convert, 'value', 'N/A')}")
+                                        else:
+                                            logger.warning(f"  Node {node_name_ac}: Waveform is empty or not indexable for fallback.")
+                                            node_voltages_ac_display[str(node_name_ac)] = "Error (no data)"
+                                            continue
+                                    
+                                    complex_voltage = safe_to_complex(value_to_convert)
+                                    logger.debug(f"  Node {node_name_ac}: Output of safe_to_complex = {complex_voltage} (Type: {type(complex_voltage)})")
+                                    
+                                    mag = np.abs(complex_voltage)
+                                    phase = np.angle(complex_voltage, deg=True)
+                                    node_voltages_ac_display[str(node_name_ac)] = f"{mag:.3f} ∠ {phase:.2f}° V"
+                                    logger.info(f"  Node {node_name_ac}: Final Display = {node_voltages_ac_display[str(node_name_ac)]}")
+ 
+                                # The old debug block for raw nodes/branches and the overwriting node_voltages_ac_display loop
+                                # have been removed. node_voltages_ac_display is now correctly populated by the preceding loop.
+                                # branch_currents_ac_display will be correctly populated by its loop below.
+
                                 branch_currents_ac_display = {}
                                 for branch_name, val_waveform in analysis_ac.branches.items():
-                                    if len(val_waveform) > 0:
-                                        # Get the value and convert to complex safely
-                                        raw_value = val_waveform[0]
-                                        print(f"DEBUG: Branch {branch_name} raw value: {raw_value}, type: {type(raw_value)}")
-                                        
-                                        complex_current = safe_to_complex(raw_value)
-                                        print(f"DEBUG: Converted to complex: {complex_current}")
-                                        
-                                        # Calculate magnitude and phase
-                                        mag = np.abs(complex_current)
-                                        phase = np.angle(complex_current, deg=True)
-                                        branch_currents_ac_display[str(branch_name)] = f"{mag:.3f} ∠ {phase:.2f}° A"
+                                    logger.debug(f"Processing Branch: {branch_name}")
+                                    value_to_convert_branch = None
+                                    is_value_complex_from_ndarray_branch = False
+
+                                    if hasattr(val_waveform, 'as_ndarray'):
+                                        try:
+                                            np_array_repr_branch = val_waveform.as_ndarray()
+                                            logger.info(f"  Branch {branch_name}: Waveform.as_ndarray() = {np_array_repr_branch} (dtype: {np_array_repr_branch.dtype})")
+                                            if (np_array_repr_branch.dtype == np.complex64 or np_array_repr_branch.dtype == np.complex128) and len(np_array_repr_branch) > 0:
+                                                value_to_convert_branch = np_array_repr_branch[0]
+                                                is_value_complex_from_ndarray_branch = True
+                                                logger.info(f"    SUCCESS: Branch {branch_name} using complex value from ndarray: {value_to_convert_branch}")
+                                            else:
+                                                logger.warning(f"    Branch {branch_name}: ndarray is not complex or is empty. Dtype: {np_array_repr_branch.dtype}, Length: {len(np_array_repr_branch)}")
+                                        except Exception as e_np_branch:
+                                            logger.error(f"  Branch {branch_name}: Error inspecting as_ndarray(): {e_np_branch}")
                                     else:
-                                        branch_currents_ac_display[str(branch_name)] = "Error (no data)"
+                                        logger.warning(f"  Branch {branch_name}: Waveform has no as_ndarray attribute.")
+
+                                    if not is_value_complex_from_ndarray_branch:
+                                        if hasattr(val_waveform, '__len__') and len(val_waveform) > 0:
+                                            value_to_convert_branch = val_waveform[0] # Fallback to UnitValue
+                                            logger.info(f"  Branch {branch_name}: Falling back to raw value from waveform[0] = '{value_to_convert_branch}' (Type: {type(value_to_convert_branch)})")
+                                            if isinstance(value_to_convert_branch, UnitValue):
+                                                logger.debug(f"    UnitValue Details: str={str(value_to_convert_branch)}, .value={getattr(value_to_convert_branch, 'value', 'N/A')}")
+                                        else:
+                                            logger.warning(f"  Branch {branch_name}: Waveform is empty or not indexable for fallback.")
+                                            branch_currents_ac_display[str(branch_name)] = "Error (no data)"
+                                            continue
+                                    
+                                    complex_current = safe_to_complex(value_to_convert_branch)
+                                    logger.debug(f"  Branch {branch_name}: Output of safe_to_complex = {complex_current} (Type: {type(complex_current)})")
+                                    
+                                    mag = np.abs(complex_current)
+                                    phase = np.angle(complex_current, deg=True)
+                                    branch_currents_ac_display[str(branch_name)] = f"{mag:.3f} ∠ {phase:.2f}° A"
+                                    logger.info(f"  Branch {branch_name}: Final Display = {branch_currents_ac_display[str(branch_name)]}")
+                                    
+                                logger.debug("--- End AC Analysis Result Inspection ---")
 
 
                                 col1_ac, col2_ac = st.columns(2)
                                 with col1_ac:
                                     st.markdown("### Node Voltages (AC)")
-                                    st.json(node_voltages_ac_display)
+                                    st.json(node_voltages_ac_display) # This will now use the correctly populated dict
                                 with col2_ac:
                                     st.markdown("### Branch Currents (AC)")
-                                    st.json(branch_currents_ac_display)
+                                    st.json(branch_currents_ac_display) # This will now use the correctly populated dict
 
                                 # After the AC analysis results display, add plots
                                 st.markdown("### AC Analysis Plots")
