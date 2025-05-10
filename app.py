@@ -19,8 +19,12 @@ from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from PySpice.Unit import *
-from PySpice.Unit import U_Hz
+from PySpice.Unit import u_Hz
 import re
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle, Arrow
+import matplotlib.colors as mcolors
 
 # Configure logging
 # Get log level from environment or default to DEBUG
@@ -41,6 +45,11 @@ logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
 logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("PIL.TiffImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+
+# Suppress PyTorch model parameter logs
+logging.getLogger("torch.nn.modules").setLevel(logging.WARNING)
+logging.getLogger("torch.nn.parameter").setLevel(logging.WARNING)
+logging.getLogger("torch").setLevel(logging.WARNING)
 
 torch.classes.__path__ = []
 
@@ -937,6 +946,7 @@ if st.session_state.active_results['original_image'] is not None:
                     logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
                     logger.info(f"GEMINI BARE OUTPUT (gemini_info): {gemini_info}")
                     st.session_state.active_results['vlm_stage2_output'] = gemini_info # Store for debugging
+                    
                     # fix_netlist will correlate gemini_info (using visual enum 'id') 
                     # with netlist lines (via persistent_uid found in bbox_ids_for_fix)
                     analyzer.fix_netlist(netlist, gemini_info, bbox_ids_for_fix)
@@ -1000,11 +1010,28 @@ if st.session_state.active_results['original_image'] is not None:
                 st.info("Final netlist not available.")
         
         # Dropdown 1: Image Sent to Gemini/VLM
-        with st.expander("🔍 Image Sent to VLM"):
-            if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img' ] is not None:
+        with st.expander("🔍 Debug: VLM"):
+            st.markdown("### Image Sent to VLM")
+            if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
                 st.image(st.session_state.active_results['enum_img'], caption="Image sent for VLM Stage 2 analysis")
             else:
                 st.info("Enumerated image for VLM not available.")
+                
+            st.markdown("### VLM Analysis Output")
+            if 'vlm_stage2_output' in st.session_state.active_results and st.session_state.active_results['vlm_stage2_output']:
+                gemini_info = st.session_state.active_results['vlm_stage2_output']
+                # Format the raw output like a netlist
+                formatted_output = "[\n"
+                for comp in gemini_info:
+                    formatted_output += "    {\n"
+                    for key, value in comp.items():
+                        formatted_output += f"        '{key}': '{value}',\n"
+                    formatted_output = formatted_output.rstrip(',\n') + "\n    },\n"
+                formatted_output = formatted_output.rstrip(',\n') + "\n]"
+                
+                st.code(formatted_output, language="python")
+            else:
+                st.info("No VLM analysis output available")
 
         # Dropdown 2: Differences in Initial Netlists (if any)
         netlist_llama_text = st.session_state.active_results.get('valueless_netlist_text')
@@ -1048,22 +1075,60 @@ if st.session_state.active_results['original_image'] is not None:
         
     
     # Step 4: SPICE Analysis - keep as is
-    if st.session_state.active_results.get('netlist_text') is not None:
+    # Only show SPICE analysis options AFTER the final netlist is generated
+    if st.session_state.get('final_netlist_generated', False):
         st.markdown("## ⚡ SPICE Analysis")
 
         # Initialize session state for analysis_mode and ac_frequency if not present
+        # analysis_mode will be overwritten by auto-detection.
         if 'analysis_mode' not in st.session_state:
             st.session_state.analysis_mode = "DC (.op)"
         if 'ac_frequency' not in st.session_state:
-            st.session_state.ac_frequency = 60.0  # Default to 1kHz
+            st.session_state.ac_frequency = 60.0  # Default to 60Hz
 
-        st.session_state.analysis_mode = st.radio(
-            "Select Analysis Type:",
-            ("DC (.op)", "AC (.ac)"),
-            key="spice_analysis_type_radio",
-            horizontal=True,
-            index=["DC (.op)", "AC (.ac)"].index(st.session_state.analysis_mode)
-        )
+        # Auto-determine analysis mode from the editable netlist content
+        # This editable_netlist_content should be the one from the final VLM-processed netlist
+        current_netlist_text_for_spice = st.session_state.get('editable_netlist_content', "")
+        determined_analysis_mode = "DC (.op)" # Default to DC
+
+        if current_netlist_text_for_spice:
+            netlist_lines = current_netlist_text_for_spice.split('\n')
+            # Pattern for "value:phase", e.g., "4:-45". Allows for optional whitespace.
+            mag_phase_pattern = re.compile(r"^[+-]?\d*\.?\d+\s*:\s*[+-]?\d*\.?\d+$")
+
+            for line in netlist_lines:
+                line_strip = line.strip()
+                if not line_strip or not line_strip[0].isalpha():
+                    continue
+
+                line_upper = line_strip.upper() # For checking component type and " AC "
+                original_line_parts = line_strip.split()
+                
+                component_type = line_upper[0]
+                is_ac_source_for_this_line = False
+                
+                if component_type == 'V' or component_type == 'I':
+                    # 1. Check for " AC " keyword (common SPICE syntax for AC analysis part of source)
+                    if " AC " in line_upper: # e.g., "V1 1 0 DC 5 AC 1 0" or "V1 1 0 AC 1 0"
+                        is_ac_source_for_this_line = True
+                    else:
+                        # 2. Check for "magnitude:phase" pattern in the arguments
+                        #    e.g., Vname n+ n- value. The value itself is "mag:phase".
+                        #    V3 3 0 4:-45 -> original_line_parts = ['V3', '3', '0', '4:-45']
+                        if len(original_line_parts) >= 4: # Minimum: Name N+ N- Value
+                            # Check argument parts starting from where values are expected
+                            for part_idx in range(3, len(original_line_parts)):
+                                if mag_phase_pattern.fullmatch(original_line_parts[part_idx].strip()):
+                                    is_ac_source_for_this_line = True
+                                    break # Found mag:phase in this line's parts, break inner loop (parts)
+                    
+                    if is_ac_source_for_this_line:
+                        determined_analysis_mode = "AC (.ac)"
+                        break # Found an AC source line, break outer (netlist_lines) loop
+        
+        st.session_state.analysis_mode = determined_analysis_mode
+        
+        st.markdown(f"**Auto-detected Analysis Type:** `{st.session_state.analysis_mode}`")
 
         ac_frequency_hz = None
         if st.session_state.analysis_mode == "AC (.ac)":
@@ -1086,22 +1151,20 @@ if st.session_state.active_results['original_image'] is not None:
                             logger.debug("Running DC SPICE analysis with netlist:")
                             logger.debug(st.session_state.editable_netlist_content)
                             
-                            net_text = (
+                            net_text_dc = (
                                 '.title detected_circuit_dc\n'
                                 + st.session_state.editable_netlist_content
-                                + '\n.control\n'
-                                + 'set filetype=ascii\n'
-                                + 'op\n'
-                                + 'wrdata $&rawfile v(*)\n'
-                                + 'quit\n'
-                                + '.endc\n'
-                                + '.end\n'
+                                + '\n.end\n'
                             )
                             
-                            logger.debug("Full DC SPICE netlist with control commands:")
-                            logger.debug(net_text)
+                            # Show complete DC SPICE netlist
+                            with st.expander("🔍 Debug: Complete SPICE Netlist (DC)"):
+                                st.code(net_text_dc, language="python")
                             
-                            parser = SpiceParser(source=net_text)
+                            logger.debug("Full DC SPICE netlist with control commands:")
+                            logger.debug(net_text_dc)
+                            
+                            parser = SpiceParser(source=net_text_dc)
                             bootstrap_circuit = parser.build_circuit()
                             
                             logger.debug("Circuit elements (DC):")
@@ -1157,7 +1220,6 @@ if st.session_state.active_results['original_image'] is not None:
                         error_msg_dc = f"❌ DC SPICE Analysis Error: {str(e_dc)}"
                         logger.error(error_msg_dc, exc_info=True)
                         st.error(error_msg_dc)
-                        st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
 
                 elif st.session_state.analysis_mode == "AC (.ac)":
                     try:
@@ -1178,7 +1240,7 @@ if st.session_state.active_results['original_image'] is not None:
                                 if component_type_prefix in ['V', 'I']:
                                     parsed_params = _parse_vlm_ac_string(original_value)
                                     if parsed_params:
-                                        # Use parsed AC mag and phase, assume DC offset 0
+                                        # Revert to including explicit DC offset, as ngspice seems to prefer it.
                                         line_dict['value'] = f"{parsed_params['dc_offset']} AC {parsed_params['mag']} {parsed_params['phase']}"
                                         logger.debug(f"Processed AC source {line_dict.get('component_type','')}{line_dict.get('component_num','')}: original='{original_value}', spice_val='{line_dict['value']}'")
                                     else:
@@ -1206,8 +1268,13 @@ if st.session_state.active_results['original_image'] is not None:
                                 net_text_ac = (
                                     '.title detected_circuit_ac\n'
                                     + netlist_content_for_pyspice
-                                    + '\n.end\n' # .control block not strictly needed for PySpice direct .ac call
+                                    + f'\n* Equivalent SPICE command being executed:\n* .ac lin 1 {ac_frequency_hz} {ac_frequency_hz}\n'
+                                    + '\n.end\n'
                                 )
+                                
+                                # Show complete AC SPICE netlist
+                                with st.expander("🔍 Debug: Complete SPICE Netlist (AC)"):
+                                    st.code(net_text_ac, language="python")
                                 
                                 logger.debug("Running AC SPICE analysis with netlist:")
                                 logger.debug(net_text_ac)
@@ -1232,8 +1299,8 @@ if st.session_state.active_results['original_image'] is not None:
                                 # Changed to pass raw float in Hz as per PySpice documentation for .ac() method parameters
                                 analysis_ac = simulator_ac.ac(
                                     variation='lin',
-                                    start_frequency=sim_freq_hz,
-                                    stop_frequency=sim_freq_hz,
+                                    start_frequency=u_Hz(sim_freq_hz),
+                                    stop_frequency=u_Hz(sim_freq_hz),
                                     number_of_points=1
                                 )
                                 
@@ -1290,8 +1357,61 @@ if st.session_state.active_results['original_image'] is not None:
                                 with col2_ac:
                                     st.markdown("### Branch Currents (AC)")
                                     st.json(branch_currents_ac_display)
-                        else:
-                            st.error("Netlist data not available for AC analysis. Please ensure 'Get Final Netlist' has been run.")
+
+                                # After the AC analysis results display, add plots
+                                st.markdown("### AC Analysis Plots")
+                                
+                                # Create tabs for different plot types
+                                plot_tabs = st.tabs(["Phasor Diagram"])
+                                
+                                with plot_tabs[0]:
+                                    # Phasor diagram for voltages and currents
+                                    try:
+                                        # Create figure with two subplots side by side
+                                        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), subplot_kw={'projection': 'polar'})
+                                        
+                                        # Plot voltage phasors
+                                        max_v_mag = 0
+                                        for node, val_waveform in analysis_ac.nodes.items():
+                                            if len(val_waveform) > 0 and str(node) != '0':  # Skip ground node
+                                                complex_val = safe_to_complex(val_waveform[0])
+                                                mag = np.abs(complex_val)
+                                                angle = np.angle(complex_val)
+                                                max_v_mag = max(max_v_mag, mag)
+                                                # Plot phasor
+                                                ax1.plot([0, angle], [0, mag], label=f'V({node})', 
+                                                        marker='o', linewidth=2)
+                                        
+                                        # Adjust voltage plot
+                                        ax1.set_title('Voltage Phasors')
+                                        ax1.set_rmax(max_v_mag * 1.2)  # Add 20% margin
+                                        ax1.grid(True)
+                                        ax1.legend()
+                                        
+                                        # Plot current phasors
+                                        max_i_mag = 0
+                                        for branch, val_waveform in analysis_ac.branches.items():
+                                            if len(val_waveform) > 0:
+                                                complex_val = safe_to_complex(val_waveform[0])
+                                                mag = np.abs(complex_val)
+                                                angle = np.angle(complex_val)
+                                                max_i_mag = max(max_i_mag, mag)
+                                                # Plot phasor
+                                                ax2.plot([0, angle], [0, mag], label=str(branch), 
+                                                        marker='o', linewidth=2)
+                                        
+                                        # Adjust current plot
+                                        ax2.set_title('Current Phasors')
+                                        ax2.set_rmax(max_i_mag * 1.2)  # Add 20% margin
+                                        ax2.grid(True)
+                                        ax2.legend()
+                                        
+                                        plt.tight_layout()
+                                        st.pyplot(fig)
+                                        plt.close()
+                                        
+                                    except Exception as e_plot:
+                                        st.error(f"Error generating phasor plots: {str(e_plot)}")
 
                     except Exception as e_ac:
                         error_msg_ac = f"❌ AC SPICE Analysis Error: {str(e_ac)}"
@@ -1305,3 +1425,7 @@ if st.session_state.active_results['original_image'] is not None:
                 logger.error(error_msg, exc_info=True)
                 st.error(error_msg)
                 st.info("💡 Tip: An unexpected error occurred during SPICE analysis setup.")
+    # If final_netlist_generated is False, but an initial netlist (valueless) exists
+    elif st.session_state.active_results.get('netlist_text') is not None:
+        st.markdown("## ⚡ SPICE Analysis")
+        st.info("Please click 'Get Final Netlist' above to enable SPICE analysis and component value detection.")

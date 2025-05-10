@@ -49,7 +49,7 @@ class CircuitAnalyzer():
         self.classes = load_classes()
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
-        self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.battery', 'voltage.dependent', 'current.dc', 'current.dependent'])
+        self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.dependent', 'current.dc', 'current.dependent'])
         
         # Add property to store last SAM2 output
         self.last_sam2_output = None
@@ -63,7 +63,7 @@ class CircuitAnalyzer():
         self.classes = {key: value for key, value in self.classes.items() if key in self.classes_names}
         self.classes = {key: i for i, key, in enumerate(self.classes.keys())}
         
-        self.project_classes = set(['gnd', 'voltage.ac', 'voltage.dc', 'voltage.battery', 'resistor', 'voltage.dependent', 'current.dc', 'current.dependent', 'capacitor', 'inductor', 'diode'])
+        self.project_classes = set(['gnd', 'voltage.ac', 'voltage.dc', 'resistor', 'voltage.dependent', 'current.dc', 'current.dependent', 'capacitor', 'inductor', 'diode'])
         self.netlist_map = {
             'resistor': 'R',
             'resistor.adjustable': 'R',
@@ -83,6 +83,7 @@ class CircuitAnalyzer():
             'voltage.battery': 'V',
             'voltage.dependent': 'E',
             'current.dc': 'I',
+            'current.ac': 'I',  
             'current.dependent': 'G',
             'vss': 'GND',
             'gnd': '0',
@@ -111,12 +112,12 @@ class CircuitAnalyzer():
         # These are string names. The numeric IDs will be used in the enrichment function.
         self.yolo_class_names_map = self.yolo.model.names # Get mapping from class ID to name from YOLO model
         self.classes_of_interest_names = {
-            'voltage.dc', 'voltage.ac', 'voltage.battery', 
+            'voltage.dc', 'voltage.ac', 
             'diode', 'diode.light_emitting', 'diode.zener',
             'transistor.bjt', 
             'unknown' 
         }
-        self.voltage_classes_names = {'voltage.dc', 'voltage.ac', 'voltage.battery', 'transistor.bjt', 'unknown'}
+        self.voltage_classes_names = {'voltage.dc', 'voltage.ac', 'transistor.bjt', 'unknown'}
         self.diode_classes_names = {'diode', 'diode.light_emitting', 'diode.zener'}
         self.current_source_classes_names = {'current.dc', 'current.dependent'}
         # --- End component types ---

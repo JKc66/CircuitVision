@@ -30,24 +30,24 @@ import io
 load_dotenv()
 
 components_dict = {
-    'gnd': 'Ground: A reference point in an electrical circuit. has no direction nor value (both None).',
-    'voltage.ac': 'AC Voltage source, has no direction (None). if its value is written in phasor, write it as magnitude:phase',
-    'voltage.dc': 'DC Voltage source, has a direction, should be specified as either up, down, left or right, depending on the direction of the + sign',
-    'voltage.battery': 'Battery Voltage source, has the direction of the largest horizontal bar of its symbol (up, down, left or right)',
-    'resistor': 'Resistor: A passive component with no direction (None)',
-    'voltage.dependent': 'Voltage-Dependent Source: A voltage source whose output voltage depends on another voltage or current in the circuit. has the direction of the + sign (up, down, left or right).',
-    'current.dc': 'DC Current: Direct current, where the current flows in one direction consistently, has the direction of the arrow inside the symbol (up, down, left or right).',
-    'current.dependent': 'Current-Dependent Source: A current source whose output current depends on another current or voltage in the circuit. has the direction of the arrow inside the symbol (up, down, left or right).',
-    'capacitor': 'Capacitor: A passive component with no direction (None)',
-    'inductor': 'Inductor: A passive component with no direction (None)',
-    'diode': 'Diode: has the direction of the symbol which is like an arrow (up, down, left or right)'
+    'gnd': 'Ground: A reference point in an electrical circuit. Its value is None.',
+    'voltage.ac': 'AC Voltage source. If its value is written in phasor, format it as magnitude:phase.',
+    'voltage.dc': 'DC Voltage source. Its polarity is important for circuit analysis.',
+    'voltage.battery': 'Battery Voltage source. Its polarity is important for circuit analysis.',
+    'resistor': 'Resistor: A passive component.',
+    'voltage.dependent': 'Voltage-Dependent Source: A voltage source whose output voltage depends on another voltage or current in the circuit. Its polarity is important.',
+    'current.dc': 'DC Current: Direct current, where the current flows in one direction consistently. Its direction of flow is important.',
+    'current.dependent': 'Current-Dependent Source: A current source whose output current depends on another current or voltage in the circuit. Its direction of flow is important.',
+    'capacitor': 'Capacitor: A passive component.',
+    'inductor': 'Inductor: A passive component.',
+    'diode': 'Diode: A semiconductor device that primarily conducts current in one direction. Its orientation is important.'
 }
 
 # Gemini prompt for component analysis
 PROMPT = """
 You are an expert electrical engineering assistant. Your task is to analyze an image of a circuit schematic.
 In the image, electrical components are marked with red ID numbers.
-Your goal is to identify these components, their values, and their directions.
+Your goal is to identify these components and their values.
 
 Output your findings as a Python list of dictionaries. Each dictionary in the list represents one component.
 Strictly adhere to the following format for each dictionary:
@@ -55,8 +55,7 @@ Strictly adhere to the following format for each dictionary:
   {
     "id": "string_id_from_image",
     "class": "component_class_name",
-    "value": "component_value_string_or_null",
-    "direction": "component_direction_string_or_None"
+    "value": "component_value_string_or_null"
   }
   // ... more components can follow
 ]
@@ -65,14 +64,12 @@ Example of a single component entry:
 {
     "id": "1",
     "class": "voltage.ac",
-    "value": "10:30",
-    "direction": "None"
+    "value": "10:30"
 }
 {
     "id": "2",
     "class": "resistor",
-    "value": "10k",
-    "direction": "None"
+    "value": "10k"
 }
 
 
@@ -95,11 +92,6 @@ Key Instructions for each field in the dictionary:
         *   For complex impedance values (e.g., for capacitors or inductors if given in ohms), use the format "R+jX" or "R-jX" as a string (e.g., "5+j3.14", "100-j50").
     *   If the value is a variable name or an expression (e.g., "V_in", "R_load", "X1", "35*V_2"), use that variable name or expression as a STRING.
     *   If no value is explicitly written next to the component on the schematic, or if it's unclear (e.g., a question mark "?"), the value MUST be `null` (if generating JSON) or `None` (if generating a Python literal string).
-
-4.  **`direction` (String):**
-    *   Use one of the strings: "up", "down", "left", "right".
-    *   If no direction applies to the component type (as per its description below), or if it's not specified, use the string "None".
-    *   Refer to the 'Component Classes and Descriptions' for guidance on direction for each component type.
 
 General Instructions:
 
