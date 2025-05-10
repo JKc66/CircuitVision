@@ -18,6 +18,9 @@ from src.utils import (summarize_components,
 from src.circuit_analyzer import CircuitAnalyzer
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
+from PySpice.Unit import *
+from PySpice.Unit import U_Hz
+import re
 
 # Configure logging
 # Get log level from environment or default to DEBUG
@@ -351,6 +354,105 @@ if uploaded_file is not None:
         # Automatically trigger analysis
         st.session_state.start_analysis_triggered = True
         st.session_state.analysis_in_progress = True
+
+
+def safe_to_complex(value):
+    """
+    Safely convert PySpice values to complex numbers for AC analysis.
+    
+    Args:
+        value: A value that could be a PySpice.Unit.Unit.UnitValue, int, float, or complex
+        
+    Returns:
+        complex: A Python complex number
+    """
+    try:
+        # If it's already a complex number
+        if isinstance(value, complex):
+            print(f"DEBUG safe_to_complex: Input is already complex: {value}")
+            return value
+            
+        # If it's a PySpice UnitValue, extract the numerical value
+        if hasattr(value, 'value'):
+            print(f"DEBUG safe_to_complex: Input is UnitValue. value.value is: {value.value}, type: {type(value.value)}")
+            return complex(value.value)
+            
+        # If it's a simple number type
+        if isinstance(value, (int, float)):
+            print(f"DEBUG safe_to_complex: Input is int/float: {value}")
+            return complex(value)
+            
+        # Try generic conversion as last resort
+        print(f"DEBUG safe_to_complex: Trying generic complex() conversion for: {value}, type: {type(value)}")
+        return complex(value)
+        
+    except (ValueError, TypeError, AttributeError) as e:
+        print(f"Warning: Could not convert {type(value)} to complex: {value}, Error: {e}")
+        # Return a default value to prevent further errors
+        return complex(0)
+
+
+
+
+# Helper function to parse AC value strings from VLM
+def _parse_vlm_ac_string(raw_value_str):
+    if not isinstance(raw_value_str, str):
+        return None
+
+    # Pattern to capture: AC <mag_val> <mag_unit> <freq_val> <freq_unit> <phase_val> <phase_unit>
+    # Example: "AC 5V 1kHz 0deg" -> mag=5, phase=0
+    # Example: "AC 10.5mA 50.2Hz -45.5deg" -> mag=10.5, phase=-45.5
+    pattern_long = re.compile(
+        r"AC\s*"                                      # "AC "
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"     # Magnitude value and optional unit
+        r"(?:[+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩHz°]*\s*" # Frequency value and optional unit (non-capturing)
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*",   # Phase value and optional unit
+        re.IGNORECASE
+    )
+    match_long = pattern_long.match(raw_value_str.strip())
+    if match_long:
+        try:
+            mag_str = match_long.group(1)
+            phase_str = match_long.group(2) # Phase is the second captured group
+            mag = float(mag_str)
+            phase = float(phase_str)
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Will try other patterns
+
+    # Fallback for "AC <mag_val><unit> <phase_val><unit>" if freq is missing
+    # Example: "AC 5V 0deg"
+    pattern_short = re.compile(
+        r"AC\s*"
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"  # Magnitude value and optional unit
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*", # Phase value and optional unit
+        re.IGNORECASE
+    )
+    match_short = pattern_short.match(raw_value_str.strip())
+    if match_short:
+        try:
+            mag_str = match_short.group(1)
+            phase_str = match_short.group(2)
+            mag = float(mag_str)
+            phase = float(phase_str)
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Will try other patterns
+    
+    # NEW: Try "<mag>:<phase>" format, e.g., "4:-45" or "1:45"
+    pattern_mag_phase = re.compile(
+        r"\s*([+-]?\d*\.?\d+)\s*:\s*([+-]?\d*\.?\d+)\s*"
+    )
+    match_mag_phase = pattern_mag_phase.fullmatch(raw_value_str.strip())
+    if match_mag_phase:
+        try:
+            mag = float(match_mag_phase.group(1))
+            phase = float(match_mag_phase.group(2))
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Should not happen if regex fullmatch succeeds
+
+    return None # If no patterns match
 
 # Analysis logic, executed if triggered
 if st.session_state.get('start_analysis_triggered', False):
@@ -948,120 +1050,258 @@ if st.session_state.active_results['original_image'] is not None:
     # Step 4: SPICE Analysis - keep as is
     if st.session_state.active_results.get('netlist_text') is not None:
         st.markdown("## ⚡ SPICE Analysis")
+
+        # Initialize session state for analysis_mode and ac_frequency if not present
+        if 'analysis_mode' not in st.session_state:
+            st.session_state.analysis_mode = "DC (.op)"
+        if 'ac_frequency' not in st.session_state:
+            st.session_state.ac_frequency = 60.0  # Default to 1kHz
+
+        st.session_state.analysis_mode = st.radio(
+            "Select Analysis Type:",
+            ("DC (.op)", "AC (.ac)"),
+            key="spice_analysis_type_radio",
+            horizontal=True,
+            index=["DC (.op)", "AC (.ac)"].index(st.session_state.analysis_mode)
+        )
+
+        ac_frequency_hz = None
+        if st.session_state.analysis_mode == "AC (.ac)":
+            ac_frequency_hz = st.number_input(
+                "Frequency for AC Analysis (Hz):",
+                min_value=0.01, # Min value slightly above zero
+                value=st.session_state.ac_frequency,
+                step=100.0,
+                format="%.2f",
+                key="ac_freq_input"
+            )
+            st.session_state.ac_frequency = ac_frequency_hz
+
+
         if st.button("Run SPICE Analysis"):
-            try:
-                # MODIFIED: Use editable_netlist_content for SPICE analysis
-                if st.session_state.editable_netlist_content:
-                    # Log the netlist we're about to simulate
-                    logger.debug("Running SPICE analysis with netlist:")
-                    logger.debug(st.session_state.editable_netlist_content)
+            try: # General try for the button action
+                if st.session_state.analysis_mode == "DC (.op)":
+                    try:
+                        if st.session_state.editable_netlist_content:
+                            logger.debug("Running DC SPICE analysis with netlist:")
+                            logger.debug(st.session_state.editable_netlist_content)
+                            
+                            net_text = (
+                                '.title detected_circuit_dc\n'
+                                + st.session_state.editable_netlist_content
+                                + '\n.control\n'
+                                + 'set filetype=ascii\n'
+                                + 'op\n'
+                                + 'wrdata $&rawfile v(*)\n'
+                                + 'quit\n'
+                                + '.endc\n'
+                                + '.end\n'
+                            )
+                            
+                            logger.debug("Full DC SPICE netlist with control commands:")
+                            logger.debug(net_text)
+                            
+                            parser = SpiceParser(source=net_text)
+                            bootstrap_circuit = parser.build_circuit()
+                            
+                            logger.debug("Circuit elements (DC):")
+                            for element in bootstrap_circuit.elements:
+                                logger.debug(f"  {element}")
+                            
+                            simulator = bootstrap_circuit.simulator(
+                                temperature=27, nominal_temperature=27, gmin=1e-12,
+                                abstol=1e-12, reltol=1e-6, chgtol=1e-14,
+                                trtol=7, itl1=100, itl2=50, itl4=10
+                            )
+                            
+                            logger.debug("Running operating point analysis (DC)...")
+                            analysis = simulator.operating_point()
+                            
+                            logger.debug("Raw DC analysis results:")
+                            logger.debug("Nodes:")
+                            for node, value in analysis.nodes.items():
+                                logger.debug(f"  {node}: {value} (type: {type(value)})")
+                            logger.debug("Branches:")
+                            for branch, value in analysis.branches.items():
+                                logger.debug(f"  {branch}: {value} (type: {type(value)})")
+                            
+                            node_voltages_dc = {}
+                            for node, value in analysis.nodes.items():
+                                try:
+                                    voltage = float(value._value if hasattr(value, '_value_') else value.get_value() if hasattr(value, 'get_value') else value)
+                                    node_voltages_dc[str(node)] = f"{voltage:.3f}V"
+                                except Exception as e_val:
+                                    logger.error(f"Error converting DC node voltage {node}: {str(e_val)}")
+                                    node_voltages_dc[str(node)] = "Error"
+                            
+                            branch_currents_dc = {}
+                            for branch, value in analysis.branches.items():
+                                try:
+                                    current = float(value._value if hasattr(value, '_value_') else value.get_value() if hasattr(value, 'get_value') else value)
+                                    branch_currents_dc[str(branch)] = f"{current*1000:.3f}mA"
+                                except Exception as e_val:
+                                    logger.error(f"Error converting DC branch current {branch}: {str(e_val)}")
+                                    branch_currents_dc[str(branch)] = "Error"
+                            
+                            col1_dc, col2_dc = st.columns(2)
+                            with col1_dc:
+                                st.markdown("### Node Voltages (DC)")
+                                st.json(node_voltages_dc)
+                            with col2_dc:
+                                st.markdown("### Branch Currents (DC)")
+                                st.json(branch_currents_dc)
+                        else:
+                            st.error("Netlist is empty. Please generate or edit the netlist before running DC SPICE analysis.")
                     
-                    # Construct proper SPICE netlist with control commands
-                    net_text = (
-                        '.title detected_circuit\n'
-                        + st.session_state.editable_netlist_content
-                        + '\n.control\n'
-                        + 'set filetype=ascii\n'
-                        + 'op\n'
-                        + 'wrdata $&rawfile v(*)\n'
-                        + 'quit\n'
-                        + '.endc\n'
-                        + '.end\n'
-                    )
-                    
-                    logger.debug("Full SPICE netlist with control commands:")
-                    logger.debug(net_text)
-                    
-                    # Configure and run SPICE simulation
-                    parser = SpiceParser(source=net_text)
-                    bootstrap_circuit = parser.build_circuit()
-                    
-                    # Log circuit details
-                    logger.debug("Circuit elements:")
-                    for element in bootstrap_circuit.elements:
-                        logger.debug(f"  {element}")
-                    
-                    # Configure simulator with specific settings
-                    simulator = bootstrap_circuit.simulator(
-                        temperature=27,  # Standard temperature in Celsius
-                        nominal_temperature=27,
-                        gmin=1e-12,     # Minimum conductance
-                        abstol=1e-12,   # Absolute error tolerance
-                        reltol=1e-6,    # Relative error tolerance
-                        chgtol=1e-14,   # Charge tolerance
-                        trtol=7,        # Truncation error tolerance
-                        itl1=100,       # DC iteration limit
-                        itl2=50,        # DC transfer curve iteration limit
-                        itl4=10         # Transient analysis iteration limit
-                    )
-                    
-                    # Run operating point analysis
-                    logger.debug("Running operating point analysis...")
-                    analysis = simulator.operating_point()
-                    
-                    # Log raw analysis results
-                    logger.debug("Raw analysis results:")
-                    logger.debug("Nodes:")
-                    for node, value in analysis.nodes.items():
-                        logger.debug(f"  {node}: {value} (type: {type(value)})")
-                    logger.debug("Branches:")
-                    for branch, value in analysis.branches.items():
-                        logger.debug(f"  {branch}: {value} (type: {type(value)})")
-                    
-                    # Format results for display
-                    node_voltages = {}
-                    for node, value in analysis.nodes.items():
-                        try:
-                            # Handle WaveForm objects
-                            if hasattr(value, 'get_value'):
-                                voltage = value.get_value()
-                                logger.debug(f"Node {node}: Using get_value() method -> {voltage}")
-                            elif hasattr(value, '_value_'):
-                                voltage = value._value_
-                                logger.debug(f"Node {node}: Using _value_ attribute -> {voltage}")
+                    except Exception as e_dc:
+                        error_msg_dc = f"❌ DC SPICE Analysis Error: {str(e_dc)}"
+                        logger.error(error_msg_dc, exc_info=True)
+                        st.error(error_msg_dc)
+                        st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
+
+                elif st.session_state.analysis_mode == "AC (.ac)":
+                    try:
+                        if st.session_state.active_results.get('netlist'):
+                            sim_netlist_data = deepcopy(st.session_state.active_results['netlist'])
+                            spice_body_lines = []
+                            
+                            for line_dict in sim_netlist_data:
+                                if line_dict.get('class') == 'gnd': # Skip gnd for explicit lines
+                                    continue
+
+                                original_value = str(line_dict.get('value', ''))
+                                component_type_prefix = line_dict.get('component_type', '')
+
+                                # Modified condition: Attempt AC parsing if it's a V or I source,
+                                # as the VLM might provide AC-formatted values for components
+                                # not strictly classified as 'voltage.ac' or 'current.ac' by YOLO.
+                                if component_type_prefix in ['V', 'I']:
+                                    parsed_params = _parse_vlm_ac_string(original_value)
+                                    if parsed_params:
+                                        # Use parsed AC mag and phase, assume DC offset 0
+                                        line_dict['value'] = f"{parsed_params['dc_offset']} AC {parsed_params['mag']} {parsed_params['phase']}"
+                                        logger.debug(f"Processed AC source {line_dict.get('component_type','')}{line_dict.get('component_num','')}: original='{original_value}', spice_val='{line_dict['value']}'")
+                                    else:
+                                        # If parsing fails for a V or I source, and it wasn't already in 'AC ...' format,
+                                        # it might be a DC value or an unparseable AC value. Log a warning but use original value
+                                        # if it doesn't look like a malformed AC attempt (e.g. just numbers for DC).
+                                        # If it explicitly started with "AC" or contained ":", but failed parsing, then warn and default.
+                                        if original_value.lower().strip().startswith('ac') or ':' in original_value:
+                                            default_ac_val = "0 AC 1 0" # Default: 0 DC offset, 1V/A mag, 0 phase
+                                            st.warning(f"Could not parse AC parameters for {component_type_prefix}{line_dict.get('component_num','')}: '{original_value}'. Using default: {default_ac_val}")
+                                            logger.warning(f"Could not parse AC parameters for {component_type_prefix}{line_dict.get('component_num','')}: '{original_value}'. Using default: {default_ac_val}")
+                                            line_dict['value'] = default_ac_val
+                                        # else: it's likely a DC value for a V/I source, leave it as is.
+                                
+                                # Use analyzer.stringify_line to build the SPICE line from the (potentially modified) line_dict
+                                spice_line = analyzer.stringify_line(line_dict)
+                                if spice_line: # stringify_line returns "" for gnd, which we already skipped
+                                    spice_body_lines.append(spice_line)
+
+                            netlist_content_for_pyspice = "\n".join(spice_body_lines)
+                            
+                            if not netlist_content_for_pyspice.strip():
+                                 st.error("Netlist for AC analysis is effectively empty after processing. Cannot simulate.")
                             else:
-                                voltage = float(value)
-                                logger.debug(f"Node {node}: Using direct float conversion -> {voltage}")
-                            node_voltages[str(node)] = f"{voltage:.3f}V"
-                        except Exception as e:
-                            logger.error(f"Error converting node voltage {node}: {str(e)}")
-                            logger.error(f"Value type: {type(value)}")
-                            logger.error(f"Value repr: {repr(value)}")
-                            node_voltages[str(node)] = "Error"
-                    
-                    branch_currents = {}
-                    for branch, value in analysis.branches.items():
-                        try:
-                            # Handle WaveForm objects
-                            if hasattr(value, 'get_value'):
-                                current = value.get_value()
-                                logger.debug(f"Branch {branch}: Using get_value() method -> {current}")
-                            elif hasattr(value, '_value_'):
-                                current = value._value_
-                                logger.debug(f"Branch {branch}: Using _value_ attribute -> {current}")
-                            else:
-                                current = float(value)
-                                logger.debug(f"Branch {branch}: Using direct float conversion -> {current}")
-                            branch_currents[str(branch)] = f"{current*1000:.3f}mA"  # Convert to mA
-                        except Exception as e:
-                            logger.error(f"Error converting branch current {branch}: {str(e)}")
-                            logger.error(f"Value type: {type(value)}")
-                            logger.error(f"Value repr: {repr(value)}")
-                            branch_currents[str(branch)] = "Error"
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("### Node Voltages")
-                        st.json(node_voltages)
-                    with col2:
-                        st.markdown("### Branch Currents")
-                        st.json(branch_currents)
-                else:
-                    st.error("Netlist is empty. Please generate or edit the netlist before running SPICE analysis.")
+                                net_text_ac = (
+                                    '.title detected_circuit_ac\n'
+                                    + netlist_content_for_pyspice
+                                    + '\n.end\n' # .control block not strictly needed for PySpice direct .ac call
+                                )
+                                
+                                logger.debug("Running AC SPICE analysis with netlist:")
+                                logger.debug(net_text_ac)
+                                
+                                parser_ac = SpiceParser(source=net_text_ac)
+                                circuit_ac = parser_ac.build_circuit()
+
+                                logger.debug("Circuit elements (AC):")
+                                for element in circuit_ac.elements:
+                                    logger.debug(f"  {element}")
+
+                                simulator_ac = circuit_ac.simulator(
+                                    temperature=27, nominal_temperature=27, gmin=1e-12,
+                                    abstol=1e-12, reltol=1e-6, chgtol=1e-14,
+                                    trtol=7, itl1=100, itl2=50, itl4=10
+                                )
+                                
+                                sim_freq_hz = st.session_state.ac_frequency
+                                logger.debug(f"Running AC analysis at {sim_freq_hz} Hz...")
+                                
+                                # PySpice expects frequency with units for .ac()
+                                # Changed to pass raw float in Hz as per PySpice documentation for .ac() method parameters
+                                analysis_ac = simulator_ac.ac(
+                                    variation='lin',
+                                    start_frequency=sim_freq_hz,
+                                    stop_frequency=sim_freq_hz,
+                                    number_of_points=1
+                                )
+                                
+                                logger.debug("Raw AC analysis results:")
+                                logger.debug("Nodes:")
+                                for node, value_waveform in analysis_ac.nodes.items():
+                                    # For single point AC, waveform has 1 complex value
+                                    complex_val = value_waveform[0] if len(value_waveform) > 0 else complex(0,0)
+                                    logger.debug(f"  {node}: {complex_val} (type: {type(complex_val)})")
+                                logger.debug("Branches:")
+                                for branch, value_waveform in analysis_ac.branches.items():
+                                    complex_val = value_waveform[0] if len(value_waveform) > 0 else complex(0,0)
+                                    logger.debug(f"  {branch}: {complex_val} (type: {type(complex_val)})")
+
+                                node_voltages_ac_display = {}
+                                for node_name_ac, val_waveform_ac in analysis_ac.nodes.items():
+                                    if len(val_waveform_ac) > 0:
+                                        # Get the value and convert to complex safely
+                                        raw_value = val_waveform_ac[0]
+                                        print(f"DEBUG: Node {node_name_ac} raw value: {raw_value}, type: {type(raw_value)}")
+                                        
+                                        complex_voltage = safe_to_complex(raw_value)
+                                        print(f"DEBUG: Converted to complex: {complex_voltage}")
+                                        
+                                        # Calculate magnitude and phase
+                                        mag = np.abs(complex_voltage)
+                                        phase = np.angle(complex_voltage, deg=True)
+                                        node_voltages_ac_display[str(node_name_ac)] = f"{mag:.3f} ∠ {phase:.2f}° V"
+                                    else:
+                                        node_voltages_ac_display[str(node_name_ac)] = "Error (no data)"
+                                
+                                branch_currents_ac_display = {}
+                                for branch_name, val_waveform in analysis_ac.branches.items():
+                                    if len(val_waveform) > 0:
+                                        # Get the value and convert to complex safely
+                                        raw_value = val_waveform[0]
+                                        print(f"DEBUG: Branch {branch_name} raw value: {raw_value}, type: {type(raw_value)}")
+                                        
+                                        complex_current = safe_to_complex(raw_value)
+                                        print(f"DEBUG: Converted to complex: {complex_current}")
+                                        
+                                        # Calculate magnitude and phase
+                                        mag = np.abs(complex_current)
+                                        phase = np.angle(complex_current, deg=True)
+                                        branch_currents_ac_display[str(branch_name)] = f"{mag:.3f} ∠ {phase:.2f}° A"
+                                    else:
+                                        branch_currents_ac_display[str(branch_name)] = "Error (no data)"
+
+
+                                col1_ac, col2_ac = st.columns(2)
+                                with col1_ac:
+                                    st.markdown("### Node Voltages (AC)")
+                                    st.json(node_voltages_ac_display)
+                                with col2_ac:
+                                    st.markdown("### Branch Currents (AC)")
+                                    st.json(branch_currents_ac_display)
+                        else:
+                            st.error("Netlist data not available for AC analysis. Please ensure 'Get Final Netlist' has been run.")
+
+                    except Exception as e_ac:
+                        error_msg_ac = f"❌ AC SPICE Analysis Error: {str(e_ac)}"
+                        logger.error(error_msg_ac, exc_info=True)
+                        st.error(error_msg_ac)
+                        st.info("💡 Tip: Check AC source parameters, frequency, and circuit connectivity.")
             
-            except Exception as e:
-                error_msg = f"❌ SPICE Analysis Error: {str(e)}"
-                logger.error(error_msg)
-                logger.error(f"Full traceback:", exc_info=True)
+            # This except block is for the general try block associated with the st.button action
+            except Exception as e: 
+                error_msg = f"❌ SPICE Analysis Main Error: {str(e)}"
+                logger.error(error_msg, exc_info=True)
                 st.error(error_msg)
-                st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
+                st.info("💡 Tip: An unexpected error occurred during SPICE analysis setup.")
