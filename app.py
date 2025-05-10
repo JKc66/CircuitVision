@@ -137,11 +137,12 @@ SAM2_CONFIG_PATH = "/" + os.path.abspath(SAM2_CONFIG_PATH_OBJ)  # Config path ne
 SAM2_BASE_CHECKPOINT_PATH = os.path.abspath(SAM2_BASE_CHECKPOINT_PATH_OBJ)
 SAM2_FINETUNED_CHECKPOINT_PATH = os.path.abspath(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ)
 
-logger.info(f"Base directory: {BASE_DIR}")
-logger.info(f"YOLO model path: {YOLO_MODEL_PATH}")
-logger.info(f"SAM2 config path: {SAM2_CONFIG_PATH}")
-logger.info(f"SAM2 base checkpoint path: {SAM2_BASE_CHECKPOINT_PATH}")
-logger.info(f"SAM2 finetuned checkpoint path: {SAM2_FINETUNED_CHECKPOINT_PATH}")
+# logger.info(f"Base directory: {BASE_DIR}")
+# logger.info(f"YOLO model path: {YOLO_MODEL_PATH}")
+# logger.info(f"SAM2 config path: {SAM2_CONFIG_PATH}")
+# logger.info(f"SAM2 base checkpoint path: {SAM2_BASE_CHECKPOINT_PATH}")
+# logger.info(f"SAM2 finetuned checkpoint path: {SAM2_FINETUNED_CHECKPOINT_PATH}")
+
 
 # Create necessary directories
 if not os.path.exists(UPLOAD_DIR):
@@ -200,6 +201,9 @@ if analyzer is None:
     st.stop()  # Stop the app if model loading failed
 else:
     logger.info("Circuit analyzer initialized successfully. Application ready.")
+
+logger.info("--"*60)
+logger.info("--"*60)
 
 # Create containers for results
 if 'active_results' not in st.session_state:
