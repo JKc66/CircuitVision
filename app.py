@@ -143,7 +143,6 @@ logger.info(f"SAM2 config path: {SAM2_CONFIG_PATH}")
 logger.info(f"SAM2 base checkpoint path: {SAM2_BASE_CHECKPOINT_PATH}")
 logger.info(f"SAM2 finetuned checkpoint path: {SAM2_FINETUNED_CHECKPOINT_PATH}")
 
-
 # Create necessary directories
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -949,29 +948,116 @@ if st.session_state.active_results['original_image'] is not None:
             try:
                 # MODIFIED: Use editable_netlist_content for SPICE analysis
                 if st.session_state.editable_netlist_content:
-                    net_text = '.title detected_circuit\\n' + st.session_state.editable_netlist_content
+                    # Log the netlist we're about to simulate
+                    logger.debug("Running SPICE analysis with netlist:")
+                    logger.debug(st.session_state.editable_netlist_content)
+                    
+                    # Construct proper SPICE netlist with control commands
+                    net_text = (
+                        '.title detected_circuit\n'
+                        + st.session_state.editable_netlist_content
+                        + '\n.control\n'
+                        + 'set filetype=ascii\n'
+                        + 'op\n'
+                        + 'wrdata $&rawfile v(*)\n'
+                        + 'quit\n'
+                        + '.endc\n'
+                        + '.end\n'
+                    )
+                    
+                    logger.debug("Full SPICE netlist with control commands:")
+                    logger.debug(net_text)
+                    
+                    # Configure and run SPICE simulation
                     parser = SpiceParser(source=net_text)
                     bootstrap_circuit = parser.build_circuit()
-                    simulator = bootstrap_circuit.simulator()
+                    
+                    # Log circuit details
+                    logger.debug("Circuit elements:")
+                    for element in bootstrap_circuit.elements:
+                        logger.debug(f"  {element}")
+                    
+                    # Configure simulator with specific settings
+                    simulator = bootstrap_circuit.simulator(
+                        temperature=27,  # Standard temperature in Celsius
+                        nominal_temperature=27,
+                        gmin=1e-12,     # Minimum conductance
+                        abstol=1e-12,   # Absolute error tolerance
+                        reltol=1e-6,    # Relative error tolerance
+                        chgtol=1e-14,   # Charge tolerance
+                        trtol=7,        # Truncation error tolerance
+                        itl1=100,       # DC iteration limit
+                        itl2=50,        # DC transfer curve iteration limit
+                        itl4=10         # Transient analysis iteration limit
+                    )
+                    
+                    # Run operating point analysis
+                    logger.debug("Running operating point analysis...")
                     analysis = simulator.operating_point()
+                    
+                    # Log raw analysis results
+                    logger.debug("Raw analysis results:")
+                    logger.debug("Nodes:")
+                    for node, value in analysis.nodes.items():
+                        logger.debug(f"  {node}: {value} (type: {type(value)})")
+                    logger.debug("Branches:")
+                    for branch, value in analysis.branches.items():
+                        logger.debug(f"  {branch}: {value} (type: {type(value)})")
+                    
+                    # Format results for display
+                    node_voltages = {}
+                    for node, value in analysis.nodes.items():
+                        try:
+                            # Handle WaveForm objects
+                            if hasattr(value, 'get_value'):
+                                voltage = value.get_value()
+                                logger.debug(f"Node {node}: Using get_value() method -> {voltage}")
+                            elif hasattr(value, '_value_'):
+                                voltage = value._value_
+                                logger.debug(f"Node {node}: Using _value_ attribute -> {voltage}")
+                            else:
+                                voltage = float(value)
+                                logger.debug(f"Node {node}: Using direct float conversion -> {voltage}")
+                            node_voltages[str(node)] = f"{voltage:.3f}V"
+                        except Exception as e:
+                            logger.error(f"Error converting node voltage {node}: {str(e)}")
+                            logger.error(f"Value type: {type(value)}")
+                            logger.error(f"Value repr: {repr(value)}")
+                            node_voltages[str(node)] = "Error"
+                    
+                    branch_currents = {}
+                    for branch, value in analysis.branches.items():
+                        try:
+                            # Handle WaveForm objects
+                            if hasattr(value, 'get_value'):
+                                current = value.get_value()
+                                logger.debug(f"Branch {branch}: Using get_value() method -> {current}")
+                            elif hasattr(value, '_value_'):
+                                current = value._value_
+                                logger.debug(f"Branch {branch}: Using _value_ attribute -> {current}")
+                            else:
+                                current = float(value)
+                                logger.debug(f"Branch {branch}: Using direct float conversion -> {current}")
+                            branch_currents[str(branch)] = f"{current*1000:.3f}mA"  # Convert to mA
+                        except Exception as e:
+                            logger.error(f"Error converting branch current {branch}: {str(e)}")
+                            logger.error(f"Value type: {type(value)}")
+                            logger.error(f"Value repr: {repr(value)}")
+                            branch_currents[str(branch)] = "Error"
                     
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown("### Node Voltages")
-                        st.json(analysis.nodes)
+                        st.json(node_voltages)
                     with col2:
                         st.markdown("### Branch Currents")
-                        st.json(analysis.branches)
+                        st.json(branch_currents)
                 else:
                     st.error("Netlist is empty. Please generate or edit the netlist before running SPICE analysis.")
             
             except Exception as e:
                 error_msg = f"❌ SPICE Analysis Error: {str(e)}"
                 logger.error(error_msg)
+                logger.error(f"Full traceback:", exc_info=True)
                 st.error(error_msg)
                 st.info("💡 Tip: Check if all component values are properly detected and the circuit is properly connected.")
-
-# Set app_has_loaded_once to True at the end of the script execution flow
-# This ensures it's True for all subsequent reruns after the very first pass.
-if not st.session_state.app_has_loaded_once:
-    st.session_state.app_has_loaded_once = True
