@@ -22,9 +22,7 @@ from PySpice.Unit import *
 from PySpice.Unit import u_Hz
 import re
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-from matplotlib.patches import Circle, Arrow
-import matplotlib.colors as mcolors
+
 
 # Configure logging
 # Get log level from environment or default to DEBUG
