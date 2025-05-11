@@ -762,7 +762,7 @@ class CircuitAnalyzer():
         return img
     
     
-    def crop_image_and_adjust_bboxes(self, image_to_crop, bboxes_to_adjust, crop_defining_bbox, padding=10):
+    def crop_image_and_adjust_bboxes(self, image_to_crop, bboxes_to_adjust, crop_defining_bbox, padding=20): # Default padding changed to 20
         """
         Crops an image based on a defining bounding box and adjusts other bounding boxes.
         Preserves persistent_uid on adjusted bboxes.
@@ -785,9 +785,10 @@ class CircuitAnalyzer():
             'crop_applied': False,
             'reason_for_no_crop': None,
             'original_image_dims': image_to_crop.shape[:2][::-1], # (width, height)
-            'defining_bbox': None,
+            'sam_extent_bbox': None, # Changed from defining_bbox
+            'encompassing_bbox_before_padding': None, # New field
             'padding_value': padding,
-            'initial_calculated_window_before_text': None,
+            'window_after_main_padding': None, # Changed from initial_calculated_window_before_text
             'text_bboxes_that_expanded_crop': [],
             'final_crop_window_abs': None,
             'cropped_image_dims': None
@@ -800,72 +801,79 @@ class CircuitAnalyzer():
             return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
 
         original_height, original_width = image_to_crop.shape[:2]
-        def_xmin, def_ymin, def_xmax, def_ymax = crop_defining_bbox
-        crop_debug_info['defining_bbox'] = (def_xmin, def_ymin, def_xmax, def_ymax)
+        
+        # Initial sam_xmin, etc. are from SAM extent (crop_defining_bbox)
+        sam_xmin, sam_ymin, sam_xmax, sam_ymax = crop_defining_bbox
+        crop_debug_info['sam_extent_bbox'] = (sam_xmin, sam_ymin, sam_xmax, sam_ymax)
 
-        # Early exit if crop_defining_bbox is already large relative to the image
+        # NEW: Calculate the union of SAM extent and all YOLO bboxes
+        effective_xmin, effective_ymin = float(sam_xmin), float(sam_ymin)
+        effective_xmax, effective_ymax = float(sam_xmax), float(sam_ymax)
+
+        for bbox in bboxes_to_adjust:
+            effective_xmin = min(effective_xmin, float(bbox['xmin']))
+            effective_ymin = min(effective_ymin, float(bbox['ymin']))
+            effective_xmax = max(effective_xmax, float(bbox['xmax']))
+            effective_ymax = max(effective_ymax, float(bbox['ymax']))
+        
+        # Now, def_xmin, etc. for the rest of the function should use these effective values
+        def_xmin, def_ymin, def_xmax, def_ymax = effective_xmin, effective_ymin, effective_xmax, effective_ymax
+        crop_debug_info['encompassing_bbox_before_padding'] = (int(round(def_xmin)), int(round(def_ymin)), int(round(def_xmax)), int(round(def_ymax)))
+
+        # Early exit if the new encompassing_bbox is already very large
         original_area = float(original_height * original_width)
-        crop_defining_bbox_width = float(max(0, def_xmax - def_xmin))
-        crop_defining_bbox_height = float(max(0, def_ymax - def_ymin))
-        crop_defining_bbox_area = crop_defining_bbox_width * crop_defining_bbox_height
+        encompassing_bbox_width = float(max(0, def_xmax - def_xmin))
+        encompassing_bbox_height = float(max(0, def_ymax - def_ymin))
+        encompassing_bbox_area = encompassing_bbox_width * encompassing_bbox_height
 
-        if original_area > 0 and (crop_defining_bbox_area / original_area) > 0.75: # Threshold: 75%
+        if original_area > 0 and (encompassing_bbox_area / original_area) > 0.90: # Threshold increased to 0.90
             if self.debug:
-                print(f"Crop: crop_defining_bbox area ({crop_defining_bbox_area:.0f}) is > 75% of original image area ({original_area:.0f}). Skipping crop.")
-            crop_debug_info['reason_for_no_crop'] = "focused_image_skip"
+                print(f"Crop: Encompassing bbox area ({encompassing_bbox_area:.0f}) is > 90% of original image area ({original_area:.0f}). Skipping crop.")
+            crop_debug_info['reason_for_no_crop'] = "encompassing_bbox_too_large" # Updated reason
             crop_debug_info['cropped_image_dims'] = crop_debug_info['original_image_dims'] # No change
             return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
 
-        # Initial crop window calculation based on crop_defining_bbox and padding
+        # Initial crop window calculation based on the NEW encompassing def_xmin, etc. and padding
         current_crop_xmin = float(max(0, def_xmin - padding))
         current_crop_ymin = float(max(0, def_ymin - padding))
         current_crop_xmax = float(min(original_width, def_xmax + padding))
         current_crop_ymax = float(min(original_height, def_ymax + padding))
-        crop_debug_info['initial_calculated_window_before_text'] = (int(round(current_crop_xmin)), int(round(current_crop_ymin)), int(round(current_crop_xmax)), int(round(current_crop_ymax)))
+        crop_debug_info['window_after_main_padding'] = (int(round(current_crop_xmin)), int(round(current_crop_ymin)), int(round(current_crop_xmax)), int(round(current_crop_ymax)))
         
         if self.debug:
-            print(f"Crop: Initial calc. crop window (SAM extent + padding): x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
+            print(f"Crop: Window after encompassing union and main padding: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
 
-        # Expand crop window to include nearby 'text' boxes
-        text_inclusion_padding = 15
+        # Expand crop window to ensure sufficient padding for 'text' boxes
+        text_inclusion_padding = 20 # Increased from 15
 
         for bbox_original in bboxes_to_adjust:
             if bbox_original.get('class') == 'text':
                 text_xmin, text_ymin, text_xmax, text_ymax = float(bbox_original['xmin']), float(bbox_original['ymin']), float(bbox_original['xmax']), float(bbox_original['ymax'])
-                interest_area_xmin = float(def_xmin - padding)
-                interest_area_ymin = float(def_ymin - padding)
-                interest_area_xmax = float(def_xmax + padding)
-                interest_area_ymax = float(def_ymax + padding)
                 
-                overlaps_interest_area = not (text_xmax < interest_area_xmin or \
-                                              text_xmin > interest_area_xmax or \
-                                              text_ymax < interest_area_ymin or \
-                                              text_ymin > interest_area_ymax)
+                # Removed overlaps_interest_area check. All text boxes will attempt to apply their padding.
+                expanded_xmin = min(current_crop_xmin, max(0, text_xmin - text_inclusion_padding))
+                expanded_ymin = min(current_crop_ymin, max(0, text_ymin - text_inclusion_padding))
+                expanded_xmax = max(current_crop_xmax, min(original_width, text_xmax + text_inclusion_padding))
+                expanded_ymax = max(current_crop_ymax, min(original_height, text_ymax + text_inclusion_padding))
 
-                if overlaps_interest_area:
-                    expanded_xmin = min(current_crop_xmin, max(0, text_xmin - text_inclusion_padding))
-                    expanded_ymin = min(current_crop_ymin, max(0, text_ymin - text_inclusion_padding))
-                    expanded_xmax = max(current_crop_xmax, min(original_width, text_xmax + text_inclusion_padding))
-                    expanded_ymax = max(current_crop_ymax, min(original_height, text_ymax + text_inclusion_padding))
+                # Check if this text box actually caused an expansion
+                did_expand = (expanded_xmin != current_crop_xmin or 
+                              expanded_ymin != current_crop_ymin or 
+                              expanded_xmax != current_crop_xmax or 
+                              expanded_ymax != current_crop_ymax)
 
-                    # Check if this text box actually caused an expansion
-                    did_expand = (expanded_xmin != current_crop_xmin or 
-                                  expanded_ymin != current_crop_ymin or 
-                                  expanded_xmax != current_crop_xmax or 
-                                  expanded_ymax != current_crop_ymax)
-
-                    current_crop_xmin, current_crop_ymin, current_crop_xmax, current_crop_ymax = expanded_xmin, expanded_ymin, expanded_xmax, expanded_ymax
-                    
-                    if did_expand:
-                        if self.debug:
-                            print(f"Crop: Text box UID {bbox_original.get('persistent_uid')} at ({text_xmin:.0f},{text_ymin:.0f})-({text_xmax:.0f},{text_ymax:.0f}) caused expansion.")
-                            print(f"Crop: Updated crop window for text: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
-                        crop_debug_info['text_bboxes_that_expanded_crop'].append({
-                            'uid': bbox_original.get('persistent_uid'),
-                            'class': bbox_original.get('class'),
-                            'coords_original': (bbox_original['xmin'], bbox_original['ymin'], bbox_original['xmax'], bbox_original['ymax']),
-                            'coords_text_box_abs': (text_xmin, text_ymin, text_xmax, text_ymax) # these are absolute to original image
-                        })
+                current_crop_xmin, current_crop_ymin, current_crop_xmax, current_crop_ymax = expanded_xmin, expanded_ymin, expanded_xmax, expanded_ymax
+                
+                if did_expand:
+                    if self.debug:
+                        print(f"Crop: Text box UID {bbox_original.get('persistent_uid')} at ({text_xmin:.0f},{text_ymin:.0f})-({text_xmax:.0f},{text_ymax:.0f}) ensured text_inclusion_padding.")
+                        print(f"Crop: Updated crop window for text padding: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
+                    crop_debug_info['text_bboxes_that_expanded_crop'].append({
+                        'uid': bbox_original.get('persistent_uid'),
+                        'class': bbox_original.get('class'),
+                        'coords_original': (bbox_original['xmin'], bbox_original['ymin'], bbox_original['xmax'], bbox_original['ymax']),
+                        'coords_text_box_abs': (text_xmin, text_ymin, text_xmax, text_ymax) # these are absolute to original image
+                    })
 
         # Finalize crop coordinates as integers, ensuring they remain within image boundaries
         crop_abs_xmin = max(0, int(round(current_crop_xmin)))
@@ -876,7 +884,7 @@ class CircuitAnalyzer():
 
         if self.debug:
             print(f"Crop: Original image dims: {original_width}x{original_height}")
-            print(f"Crop: Defining bbox for crop (SAM extent): {def_xmin, def_ymin, def_xmax, def_ymax}")
+            print(f"Crop: Defining bbox for crop (SAM extent): {sam_xmin, sam_ymin, sam_xmax, sam_ymax}")
             print(f"Crop: Final calculated absolute crop window (xmin,ymin,xmax,ymax): {crop_abs_xmin}, {crop_abs_ymin}, {crop_abs_xmax}, {crop_abs_ymax}")
 
         if crop_abs_xmin >= crop_abs_xmax or crop_abs_ymin >= crop_abs_ymax:
@@ -1344,116 +1352,157 @@ class CircuitAnalyzer():
         return netlist
 
     def fix_netlist(self, netlist, vlm_out, all_enumerated_bboxes):
+        # First Pass: Update component information (class, type, value) from VLM output
+        # and store visual_id for sorting.
         for line_from_gen_netlist in netlist:
             target_persistent_uid = line_from_gen_netlist.get('persistent_uid')
             if not target_persistent_uid:
                 if self.debug:
-                    print(f"Debug: Line in netlist missing persistent_uid: {line_from_gen_netlist}")
+                    print(f"Debug fix_netlist (Pass 1): Line in netlist missing persistent_uid: {line_from_gen_netlist}")
                 continue
 
             visual_id_for_this_component = None
-            # Find the visual ID associated with this persistent_uid from all_enumerated_bboxes
             for enum_bbox in all_enumerated_bboxes:
                 if enum_bbox.get('persistent_uid') == target_persistent_uid:
-                    visual_id_for_this_component = enum_bbox.get('id') # This 'id' is the visual enum
+                    visual_id_for_this_component = enum_bbox.get('id')
                     break
             
+            line_from_gen_netlist['visual_id'] = visual_id_for_this_component # Store for sorting
+
             if visual_id_for_this_component is None:
                 if self.debug:
-                    print(f"Debug: Could not find visual_id for persistent_uid {target_persistent_uid}")
+                    print(f"Debug fix_netlist (Pass 1): Could not find visual_id for persistent_uid {target_persistent_uid}. Will not be updated by VLM.")
+                # Ensure 'class' and 'component_type' are consistent if no VLM update
+                if 'class' not in line_from_gen_netlist: # Should exist from generate_netlist
+                    line_from_gen_netlist['class'] = 'unknown' # Fallback
+                if 'component_type' not in line_from_gen_netlist: # Should exist
+                    line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
                 continue
 
-            # Now find the item in vlm_out (Gemini's output) that has this visual_id
+            found_vlm_match = False
             for vlm_item in vlm_out:
                 if str(vlm_item.get('id')) == str(visual_id_for_this_component):
-                    # Apply updates from vlm_item to line_from_gen_netlist
-                    current_value_in_netlist_line = line_from_gen_netlist.get('value') # Initially the string "None"
-                    vlm_provided_value = vlm_item.get('value') # Value from Gemini, e.g., "2k" or Python None
-
-                    # Potentially override vlm_provided_value if it's problematic for an independent source
+                    found_vlm_match = True
+                    current_value_in_netlist_line = line_from_gen_netlist.get('value')
+                    vlm_provided_value = vlm_item.get('value')
                     effective_vlm_value = vlm_provided_value
-                    # Check the component_type *after* potential update from VLM class below
-                    # We need to know the final intended type of the component.
-                    
-                    # Store original class and type before VLM override for comparison
-                    original_yolo_class = line_from_gen_netlist.get('class')
-                    original_component_type = line_from_gen_netlist.get('component_type')
                     
                     vlm_class = vlm_item.get('class')
-                    prospective_component_type = self.netlist_map.get(vlm_class, 'UN') # Get component type based on VLM's class
+                    if not vlm_class: # If VLM provides no class, skip VLM update for this item.
+                        if self.debug:
+                            print(f"Debug fix_netlist (Pass 1): VLM item for visual_id {visual_id_for_this_component} has no class. Skipping VLM update for this component.")
+                        # Ensure 'class' and 'component_type' are consistent if no VLM update
+                        if 'class' not in line_from_gen_netlist: line_from_gen_netlist['class'] = 'unknown'
+                        if 'component_type' not in line_from_gen_netlist: line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
+                        break 
 
-                    if prospective_component_type in ['V', 'I']: # Independent V or I source based on VLM's classification
+                    prospective_component_type_from_vlm = self.netlist_map.get(vlm_class, 'UN')
+
+                    if prospective_component_type_from_vlm in ['V', 'I']:
                         if isinstance(vlm_provided_value, str):
                             try:
-                                float(vlm_provided_value) # Check if it's a number string
-                                # If successful, it's a numeric string, so it's a valid value.
+                                float(vlm_provided_value)
                             except ValueError:
-                                # It's a string but not a simple number.
-                                # If it's purely alphabetical (e.g., "ia") and not 'ac' (valid for AC sources), treat as invalid.
                                 if vlm_provided_value.isalpha() and vlm_provided_value.lower() != 'ac':
                                     if self.debug:
-                                        print(f"Debug fix_netlist: Independent source type {prospective_component_type} "
-                                              f"derived from VLM class {vlm_class} with problematic alpha value '{vlm_provided_value}'. Setting effective value to None.")
+                                        print(f"Debug fix_netlist (Pass 1): Independent source {prospective_component_type_from_vlm} (VLM class {vlm_class}) with problematic alpha value '{vlm_provided_value}'. Setting value to None. UID: {target_persistent_uid}")
                                     effective_vlm_value = None
                     
-                    if self.debug:
-                        print(f"Debug fix_netlist: comp_uid={target_persistent_uid}, visual_id={visual_id_for_this_component}, vlm_item_id={vlm_item.get('id')}")
-                        print(f"Debug fix_netlist: current_value_in_netlist_line='{current_value_in_netlist_line}' (type: {type(current_value_in_netlist_line)})")
-                        print(f"Debug fix_netlist: vlm_provided_value='{vlm_provided_value}' (type: {type(vlm_provided_value)})")
-                        print(f"Debug fix_netlist: prospective_component_type='{prospective_component_type}', effective_vlm_value='{effective_vlm_value}' (type: {type(effective_vlm_value)})")
-
                     if current_value_in_netlist_line is None or str(current_value_in_netlist_line).strip().lower() == 'none':
-                        line_from_gen_netlist['value'] = effective_vlm_value # Use potentially modified value
-                        if self.debug:
-                            print(f"Debug fix_netlist: Value UPDATED to '{line_from_gen_netlist.get('value')}' (type: {type(line_from_gen_netlist.get('value'))})")
-                    # If current value was not None, but our new logic sets effective_vlm_value to None (for problematic V/I sources), we should update
+                        line_from_gen_netlist['value'] = effective_vlm_value
                     elif effective_vlm_value is None and \
-                         prospective_component_type in ['V', 'I'] and \
+                         prospective_component_type_from_vlm in ['V', 'I'] and \
                          (current_value_in_netlist_line is not None and str(current_value_in_netlist_line).strip().lower() != 'none'):
                         line_from_gen_netlist['value'] = None
-                        if self.debug:
-                            print(f"Debug fix_netlist: Value OVERRIDDEN to None for {prospective_component_type} "
-                                  f"due to problematic VLM value '{vlm_provided_value}'. Original line value: '{current_value_in_netlist_line}'")
-                    else:
-                        if self.debug:
-                            print(f"Debug fix_netlist: Value NOT updated, current_value_in_netlist_line was '{current_value_in_netlist_line}'")
-
-                    # Update class and component_type based on VLM, this should happen *after* value check related to prospective_component_type
-                    if original_yolo_class != vlm_class: # Compare with original YOLO class
-                        if self.debug:
-                            print(f"Fixing Netlist: Component with p_uid {target_persistent_uid} (VisualID {visual_id_for_this_component}). "
-                                  f"Original YOLO class: {original_yolo_class}, "
-                                  f"VLM class: {vlm_class}")
-                        
-                        line_from_gen_netlist['class'] = vlm_class
-                        line_from_gen_netlist['component_type'] = prospective_component_type # Use the already determined type
-                        
-                        # Recalculate component_num if the component_type prefix changes
-                        # or if the class changes significantly.
-                        if original_component_type != prospective_component_type or original_yolo_class != vlm_class :
-                            new_class_component_numbers = []
-                            for l_other in netlist:
-                                if l_other.get('persistent_uid') != target_persistent_uid and l_other.get('class') == vlm_class:
-                                    num = l_other.get('component_num')
-                                    if num is not None:
-                                        try:
-                                            new_class_component_numbers.append(int(num))
-                                        except ValueError:
-                                            if self.debug:
-                                                print(f"Debug: Non-integer component_num {num} for class {vlm_class}")
-                            line_from_gen_netlist['component_num'] = max(new_class_component_numbers, default=0) + 1
-
-
+                    
+                    # Update class and component_type based on VLM
+                    line_from_gen_netlist['class'] = vlm_class
+                    line_from_gen_netlist['component_type'] = prospective_component_type_from_vlm
+                    
                     if vlm_class == 'gnd':
                         line_from_gen_netlist['node_2'] = 0
                     
-                    break # Found and processed vlm_item for this line_from_gen_netlist
-        # Potentially add a global re-numbering pass here if strict R1,R2, C1,C2 ordering is critical across all components.
+                    if self.debug:
+                        print(f"Debug fix_netlist (Pass 1): Updated component UID {target_persistent_uid} (VisualID {visual_id_for_this_component}) with VLM data. New class: {vlm_class}, New type: {prospective_component_type_from_vlm}, New value: {line_from_gen_netlist['value']}")
+                    break 
+            
+            if not found_vlm_match:
+                if self.debug:
+                    print(f"Debug fix_netlist (Pass 1): No VLM match found for component UID {target_persistent_uid} (VisualID {visual_id_for_this_component}). Original class/type preserved.")
+                # Ensure 'class' and 'component_type' are consistent if no VLM update
+                if 'class' not in line_from_gen_netlist: line_from_gen_netlist['class'] = 'unknown'
+                if 'component_type' not in line_from_gen_netlist: line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
+
+
+        # Sort netlist by visual_id to ensure stable numbering if visual_id exists.
+        # Components without a visual_id (e.g., if not found in all_enumerated_bboxes) will be placed based on Python's default sort stability for None.
+        # For robust sorting, convert visual_id to int if it's numeric, or handle None appropriately.
+        def sort_key(item):
+            vid = item.get('visual_id')
+            if vid is None:
+                return (float('inf'), item.get('persistent_uid')) # Place None visual_ids last, then by UID
+            try:
+                return (int(vid), item.get('persistent_uid'))
+            except (ValueError, TypeError):
+                return (float('inf'), item.get('persistent_uid')) # Fallback for non-integer visual_ids
+
+        netlist.sort(key=sort_key)
+        if self.debug:
+            print("Debug fix_netlist: Netlist after sorting by visual_id:")
+            for i, item_sorted in enumerate(netlist):
+                 print(f"  Sorted item {i}: VisualID {item_sorted.get('visual_id')}, Class {item_sorted.get('class')}, Type {item_sorted.get('component_type')}, UID {item_sorted.get('persistent_uid')}")
+
+        # Second Pass: Re-number all components sequentially based on their final types.
+        final_component_counters = {comp_type: 1 for comp_type in set(self.netlist_map.values()) if comp_type}
+        # Add a counter for 'UN' if it's not in netlist_map values or handle unknown types explicitly.
+        if 'UN' not in final_component_counters:
+            final_component_counters['UN'] = 1
+
+        for line_item in netlist:
+            component_type_final = line_item.get('component_type') # This is the VLM-derived type
+            
+            # Ensure component_type_final is valid and in counters
+            if not component_type_final or component_type_final not in final_component_counters:
+                if self.debug:
+                    print(f"Debug fix_netlist (Pass 2): Encountered unexpected component_type '{component_type_final}' for UID {line_item.get('persistent_uid')}. Defaulting to 'UN'.")
+                component_type_final = 'UN' # Default to UN if type is missing or invalid
+                if 'UN' not in final_component_counters: # Ensure UN counter exists
+                    final_component_counters['UN'] = 1
+            
+            # Assign new component_num. GND components usually don't get a number in SPICE,
+            # but we can assign one internally if needed, or skip.
+            # For now, we'll number all non-empty types.
+            if component_type_final: # Only number if type is not empty string
+                line_item['component_num'] = final_component_counters[component_type_final]
+                final_component_counters[component_type_final] += 1
+            else:
+                # If component_type_final is an empty string (e.g. for 'junction'), it won't be numbered.
+                # It might already lack a 'component_num' or have a placeholder.
+                # We can explicitly remove/set to None if desired.
+                line_item.pop('component_num', None) 
+            
+            if self.debug:
+                print(f"Debug fix_netlist (Pass 2): Re-numbered component UID {line_item.get('persistent_uid')}. Final Type: {component_type_final}, New Num: {line_item.get('component_num')}")
 
     def stringify_line(self, netlist_line):
-        if netlist_line.get('class') == 'gnd':
-            return ""  # Ground components don't have a direct SPICE line; their nodes become '0'
-        return f"{netlist_line['component_type']}{netlist_line['component_num']} {netlist_line['node_1']} {netlist_line['node_2']} {netlist_line['value']}"
+        # Skip ground components and components with empty type (like junctions)
+        # from SPICE output.
+        component_type = netlist_line.get('component_type')
+        if netlist_line.get('class') == 'gnd' or not component_type:
+            return ""
+        
+        # Ensure all necessary parts are present for stringification
+        component_num = netlist_line.get('component_num')
+        node_1 = netlist_line.get('node_1')
+        node_2 = netlist_line.get('node_2')
+        value = netlist_line.get('value', "None") # Default value to "None" string if not present
+
+        if component_num is None or node_1 is None or node_2 is None:
+            if self.debug:
+                print(f"Debug stringify_line: Skipping line due to missing essential fields. Line: {netlist_line}")
+            return "" # Cannot form a valid SPICE line
+
+        return f"{component_type}{component_num} {node_1} {node_2} {value}"
 
     def _encode_image_for_llama(self, img_array_rgb):
         """Convert numpy array (RGB) to base64 encoded image for LLaMA."""
@@ -1647,9 +1696,9 @@ Example responses:
                         ]
                     }
                 ],
-                temperature=0, 
+                temperature=0.1, 
                 max_tokens=1024, 
-                top_p=0.95,         
+                top_p=0.98,         
                 stream=False,
                 response_format={"type": "json_object"} 
             )
