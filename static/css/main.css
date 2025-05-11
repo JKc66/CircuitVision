@@ -1,3 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+    --primary-color: #0070f3; /* Next.js/Vercel Blue */
+    --primary-text-color: #ffffff;
+    --secondary-button-bg: #ffffff;
+    --secondary-button-text: #333333;
+    --secondary-button-border: #e0e0e0;
+    --secondary-button-hover-bg: #f0f0f0;
+    --secondary-button-hover-border: #cccccc;
+    --app-bg: #ffffff; /* Light theme background */
+    --text-color: #111827; /* Dark text for content */
+    --subtle-border-color: #eaeaea;
+    --input-bg-color: #ffffff;
+    --input-border-color: #d1d5db; /* Tailwind gray-300 */
+}
+
+body {
+    background-color: var(--app-bg);
+    color: var(--text-color);
+    font-family: 'Inter', sans-serif; /* Apply Inter font */
+    -webkit-font-smoothing: antialiased; /* Improve font rendering on WebKit */
+    -moz-osx-font-smoothing: grayscale; /* Improve font rendering on Firefox */
+}
+
+/* General Button Styling - Base for Primary and Secondary */
+button[data-testid^="stBaseButton-"] {
+    border-radius: 6px;
+    padding: 10px 18px; /* Slightly larger padding for general buttons */
+    font-weight: 500;
+    font-size: 0.95em;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid transparent; /* Base border */
+    cursor: pointer;
+}
+
+/* Primary Button Styling */
+button[data-testid="stBaseButton-primary"] {
+    background-color: var(--primary-color);
+    color: var(--primary-text-color);
+    border-color: var(--primary-color);
+}
+
+button[data-testid="stBaseButton-primary"]:hover {
+    background-color: #0056b3; /* Darker shade of primary */
+    border-color: #0056b3;
+    box-shadow: 0 2px 8px rgba(0, 112, 243, 0.2);
+}
+
+button[data-testid="stBaseButton-primary"]:active {
+    background-color: #004080; /* Even darker */
+    border-color: #004080;
+    box-shadow: none;
+}
+
+button[data-testid="stBaseButton-primary"]:disabled,
+button[data-testid="stBaseButton-primary"][disabled] {
+    background-color: #a0cfff; /* Lighter, desaturated blue */
+    border-color: #a0cfff;
+    color: #e0f0ff; /* Very light text */
+    cursor: not-allowed;
+}
+
+/* Secondary Button Styling (Default Streamlit Button) */
+button[data-testid="stBaseButton-secondary"] {
+    background-color: var(--secondary-button-bg);
+    color: var(--secondary-button-text);
+    border: 1px solid var(--secondary-button-border);
+}
+
+button[data-testid="stBaseButton-secondary"]:hover {
+    background-color: var(--secondary-button-hover-bg);
+    border-color: var(--secondary-button-hover-border);
+    color: #000000;
+}
+
+button[data-testid="stBaseButton-secondary"]:active {
+    background-color: #e0e0e0; /* Darker gray on active/press */
+    border-color: #b0b0b0;
+}
+
+button[data-testid="stBaseButton-secondary"]:disabled,
+button[data-testid="stBaseButton-secondary"][disabled] {
+    background-color: #f5f5f5; /* Light gray */
+    border-color: #e0e0e0;
+    color: #aaaaaa; /* Light gray text */
+    cursor: not-allowed;
+}
+
 /* Hide Streamlit header */
 .stAppHeader {
     display: none !important;
@@ -14,51 +103,105 @@
 }
 
 /* Reduce space above banner */
-.main > div:first-child {
-    padding-top: 0.5rem !important;
+.st-emotion-cache-1w723zb {
+    padding: 1rem 1rem 10rem !important;
 }
 
-/* Adjust spacing for the first image (banner) */
-.main > div:first-child img {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-}
+
 
 /* Style inline code (text between backticks) */
 code {
-    color: #003edd !important; /* Change to red color instead of default green */
-   
+    color: #d35400 !important; /* Rich orange text */
+    background-color: #fff6ed; /* Very light orange/peach background */
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #ffd9b3; /* Soft orange border */
+    font-family: 'JetBrains Mono', 'Fira Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    font-size: 0.95em;
+    line-height: 1.5;
+    box-shadow: none;
+    transition: none;
 }
 
 /* Style for Streamlit expander (dropdown) - General */
 div[data-testid="stExpander"] {
-    background-color: #f8f9fa; /* A very light gray for the expander content area */
-    border-radius: 5px;
-    margin-bottom: 10px;
-    border: 1px solid #e0e0e0;
+    background-color: var(--app-bg);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    border: 1px solid transparent; /* Initially transparent border */
+    overflow: hidden;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+div[data-testid="stExpander"]:hover {
+    border-color: var(--subtle-border-color); /* Subtle border on hover */
+    /* box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); */ /* Optional: subtle shadow for lift */
 }
 
 /* Style ONLY the header of general expanders */
 div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
-    background-color: #e9ecef; /* Slightly darker gray for the header */
-    padding: 8px 12px;
-    border-radius: 4px 4px 0 0; /* Round top corners */
+    background-color: transparent; /* Fully transparent header background */
+    color: var(--text-color);
+    padding: 14px 18px; /* Slightly adjusted padding */
+    border-radius: 0;
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out;
 }
 
-/* Remove default Streamlit border from the header as we manage it */
-div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:first-child {
-    border-bottom: none; 
+div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:hover {
+    background-color: rgba(0, 0, 0, 0.02); /* Very subtle tint on hover */
 }
+
+div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpanderHeader"] {
+    border-bottom: 1px solid var(--subtle-border-color); /* Border when expanded */
+}
+
+/* Styling for the content area within the expander */
+div[data-testid="stExpanderDetails"] {
+    padding: 18px; /* Padding for the content */
+    background-color: transparent; /* Ensure content area bg is also transparent or app-bg */
+}
+
+/* Remove default Streamlit border from the header as we manage it - this might be less critical now but safe to keep */
+div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:first-child {
+    border-bottom: none;
+}
+/* Re-ensure border only shows when expanded, overriding the above if necessary */
+div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpanderHeader"]:first-child {
+    border-bottom: 1px solid var(--subtle-border-color);
+}
+
 
 /* Detailed Timings Expander - Custom Styling */
 .detailed-timings-expander div[data-testid="stExpander"] {
     background-color: #e6ffed; /* Light green background for content area */
-    border: 1px solid #a3d9b1; /* Greenish border */
+    border: 1px solid #a3d9b1; /* Greenish border - keep distinct */
+    border-radius: 6px; /* Consistent border-radius */
 }
+
+.detailed-timings-expander div[data-testid="stExpander"]:hover {
+    border-color: #8ccaa1; /* Slightly darker green border on hover */
+    /* box-shadow: 0 2px 8px rgba(163, 217, 177, 0.3); */ /* Optional: green-tinted shadow */
+}
+
 
 .detailed-timings-expander div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
     background-color: #c9f7d5; /* Slightly darker green for the header */
     color: #004d00; /* Dark green text for contrast */
+    /* padding will be inherited or can be set specifically if needed */
+}
+
+.detailed-timings-expander div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:hover {
+    background-color: #b8f5c9; /* Lighter green tint on hover for header */
+}
+
+.detailed-timings-expander div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpanderHeader"] {
+    border-bottom: 1px solid #a3d9b1; /* Greenish border when expanded */
+}
+
+.detailed-timings-expander div[data-testid="stExpanderDetails"] {
+    padding: 18px; /* Consistent padding */
+    background-color: #e6ffed; /* Ensure content area matches expander bg */
 }
 
 /* New styles for the pop-up loader */
@@ -157,6 +300,84 @@ div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:first-child 
     }
 }
 
+/* Styles for the initial model loader */
+.initial-loader-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 2rem 1rem; /* Add some padding around */
+    width: 100%; /* Occupy full width to center content properly */
+    box-sizing: border-box;
+}
+
+.initial-loader-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem; /* Reduced gap slightly */
+    padding: 1.5rem; /* Adjusted padding */
+    background-color: var(--app-bg); 
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    color: var(--text-color);
+    border: 1px solid var(--subtle-border-color);
+}
+
+.initial-loader-content p {
+    font-size: 1.0em; /* Slightly smaller font for a more subtle look */
+    font-weight: 500;
+    margin: 0;
+}
+
+/* Ensuring the gemini-loader within this context has a decent size */
+.initial-loader-content .gemini-loader {
+    width: 38px; 
+    height: 38px;
+}
+
+/* New Circuit Model Loader */
+.circuit-model-loader {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 60px; /* Container for the bars */
+    height: 40px; /* Height of the bars */
+}
+
+.circuit-model-loader > div {
+    width: 8px; /* Width of each bar */
+    height: 100%;
+    margin: 0 3px; /* Spacing between bars */
+    background-color: var(--primary-color); /* Use your app's primary color */
+    border-radius: 3px;
+    animation: pulse-bars 1.2s infinite ease-in-out;
+}
+
+/* Animation delay for each bar */
+.circuit-model-loader > div:nth-child(1) {
+    animation-delay: -0.30s;
+}
+
+.circuit-model-loader > div:nth-child(2) {
+    animation-delay: -0.15s;
+}
+
+.circuit-model-loader > div:nth-child(3) {
+    animation-delay: 0s;
+}
+
+@keyframes pulse-bars {
+    0%, 80%, 100% {
+        transform: scaleY(0.4);
+        opacity: 0.7;
+    }
+    40% {
+        transform: scaleY(1.0);
+        opacity: 1;
+    }
+}
+
 /* Make sure sidebar buttons are always visible */
 div[data-testid="stSidebarCollapseButton"],
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"]),
@@ -229,5 +450,149 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"]):ac
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L"]):active {
     background-color: #eeeeee;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* Custom File Uploader Styles (Vercel/Next.js Inspired) */
+section[data-testid="stFileUploaderDropzone"] {
+    display: flex; /* Arrange instructions and button in a row */
+    flex-direction: row;
+    align-items: center; /* Vertically center items in the row */
+    justify-content: space-between; /* Push instructions and button apart */
+    border: 2px dashed #e0e0e0; /* Light dashed border */
+    border-radius: 8px;
+    padding: 20px; /* Adjusted padding */
+    background-color: #f9f9f9; /* Very light gray background */
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+section[data-testid="stFileUploaderDropzone"]:hover {
+    background-color: #f0f0f0; /* Slightly darker on hover */
+    border-color: #cccccc; /* Darker border on hover */
+}
+
+/* Hide default Streamlit icon if a new one is preferred or for cleaner look */
+section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-nwtri {
+    /* display: none; */ /* Uncomment if you want to hide the default cloud icon */
+    margin-bottom: 12px; /* Space below icon */
+}
+
+section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-nwtri svg {
+    fill: #555555; /* Darker gray for the icon */
+    width: 48px; /* Adjust icon size */
+    height: 48px;
+}
+
+/* Styling for the "Drag and drop file here" text */
+section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-9ycgxx {
+    font-size: 1.1em; /* Larger text */
+    color: #333333; /* Darker text color */
+    font-weight: 500; /* Slightly bolder */
+    display: block; /* Ensure it takes full width for centering */
+    margin-bottom: 6px;
+}
+
+/* Styling for the "Limit 200MB per file..." text */
+section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-1rpn56r {
+    font-size: 0.85em; /* Smaller text */
+    color: #777777; /* Lighter gray for subtext */
+}
+
+/* Styling for the "Browse files" button */
+section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"] {
+    background-color: #ffffff; /* White background */
+    color: #333333; /* Dark text */
+    border: 1px solid #cccccc; /* Light gray border */
+    border-radius: 6px;
+    padding: 8px 18px; /* Adjust padding */
+    font-weight: 500;
+    margin-top: 0; /* Remove top margin as it's now side-by-side */
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    flex-shrink: 0; /* Prevent button from shrinking */
+}
+
+section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]:hover {
+    background-color: #f0f0f0; /* Light gray on hover */
+    border-color: #bbbbbb;
+    color: #000000;
+}
+
+section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]:active {
+    background-color: #e0e0e0; /* Darker gray on active/press */
+    border-color: #aaaaaa;
+}
+
+/* Make the instructions container flex for better alignment */
+section[data-testid="stFileUploaderDropzone"] > div[data-testid="stFileUploaderDropzoneInstructions"] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start; /* Align icon/text to the left */
+    justify-content: center;
+    flex-grow: 1; /* Allow instructions to take available space */
+    margin-right: 15px; /* Add some space between instructions and button */
+}
+
+/* Styles for the uploaded file item (pill) */
+div[data-testid="stFileUploaderFile"] {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 8px; /* Consistent with dropzone */
+    background-color: #f9f9f9; /* Consistent light background */
+    margin-top: 12px; /* Space above the pill */
+    border: 1px solid #e0e0e0; /* Consistent border */
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04); /* Subtle shadow */
+}
+
+/* Icon within the file pill */
+div[data-testid="stFileUploaderFile"] > div:first-child svg { /* Targets the icon container's SVG */
+    fill: #555555; /* Same as dropzone icon color */
+    width: 20px;
+    height: 20px;
+}
+
+/* Container for filename and size */
+div[data-testid="stFileUploaderFile"] .stFileUploaderFileData {
+    display: flex; /* Key for one-line display of children */
+    align-items: baseline; /* Align text baselines */
+    flex-grow: 1; /* Take available space */
+    margin-left: 10px; /* Space between icon and text block */
+    margin-right: 10px; /* Space between text block and delete button */
+    overflow: hidden; /* Prevent text overflow issues */
+}
+
+/* Filename style */
+div[data-testid="stFileUploaderFileName"] {
+    font-weight: 500; /* Medium weight for filename */
+    color: #333333; /* Darker text */
+    white-space: nowrap; /* Prevent filename from wrapping */
+    overflow: hidden; /* Hide overflow if too long */
+    text-overflow: ellipsis; /* Show ... for long filenames */
+    margin-right: 8px; /* Space between filename and size */
+    font-size: 0.95em;
+}
+
+/* File size style */
+div[data-testid="stFileUploaderFile"] .stFileUploaderFileData > small {
+    font-size: 0.8em; /* Slightly smaller size text */
+    color: #777777; /* Lighter gray for size */
+    white-space: nowrap; /* Prevent size from wrapping */
+    flex-shrink: 0; /* Prevent size from shrinking if filename is very long */
+}
+
+/* Delete button in the file pill */
+div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-minimal"] {
+    padding: 4px;
+    border-radius: 50%; /* Make it circular for a cleaner look */
+    transition: background-color 0.2s ease;
+}
+
+div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-minimal"]:hover {
+    background-color: #e0e0e0; /* Hover effect for delete button */
+}
+
+div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-minimal"] svg {
+    fill: #555555; /* Icon color */
+    width: 16px; /* Adjust size */
+    height: 16px;
 }
 

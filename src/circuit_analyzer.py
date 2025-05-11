@@ -1647,7 +1647,7 @@ Example responses:
                         ]
                     }
                 ],
-                temperature=0.1, 
+                temperature=0, 
                 max_tokens=1024, 
                 top_p=0.95,         
                 stream=False,
@@ -1721,7 +1721,7 @@ Example responses:
                 orig_xmax, orig_ymax = int(bbox['xmax']), int(bbox['ymax'])
                 
                 # Define padding for the LLaMA crop
-                llama_crop_padding = 10  # Pixels
+                llama_crop_padding = 15  # Pixels
                 h, w = image_rgb.shape[:2]
 
                 # Apply padding and ensure coordinates are within image bounds

@@ -21,7 +21,7 @@ def perform_dc_spice_analysis(current_netlist_content, app_logger):
             )
             
             with st.expander("🔍 Debug: Complete SPICE Netlist (DC)"):
-                st.code(net_text_dc, language="spice") # Changed language for syntax highlighting
+                st.code(net_text_dc, language="verilog") # Changed language for syntax highlighting
             
             app_logger.debug("Full DC SPICE netlist with control commands:")
             app_logger.debug(net_text_dc)
@@ -165,7 +165,7 @@ def perform_ac_spice_analysis(active_results_data, analyzer_instance, current_ac
             )
             
             with st.expander("🔍 Debug: Complete SPICE Netlist (AC)"):
-                st.code(net_text_ac, language="spice") # Changed language
+                st.code(net_text_ac, language="verilog") # Changed language
             
             app_logger.debug("Running AC SPICE analysis with netlist:")
             app_logger.debug(net_text_ac)

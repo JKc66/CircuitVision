@@ -109,41 +109,93 @@ else:
     logger.info("All SAM2 model files found and will be used")
     use_sam2_feature = True
 
+# Initialize session state for analyzer loading and toast
+if 'circuit_analyzer_object_storage' not in st.session_state:
+    st.session_state.circuit_analyzer_object_storage = None
+if 'circuit_analyzer_loaded_flag' not in st.session_state:
+    st.session_state.circuit_analyzer_loaded_flag = False
+if 'model_load_toast_shown' not in st.session_state: # Keep existing toast flag
+    st.session_state.model_load_toast_shown = False
+
 # Initialize the circuit analyzer with error handling
-@st.cache_resource
+@st.cache_resource(show_spinner=False) # MODIFIED: Disable default spinner
 def load_circuit_analyzer():
     try:
-        analyzer = CircuitAnalyzer(
+        analyzer_obj = CircuitAnalyzer( # Renamed internal variable
             yolo_path=str(YOLO_MODEL_PATH),
             sam2_config_path=str(SAM2_CONFIG_PATH),
             sam2_base_checkpoint_path=str(SAM2_BASE_CHECKPOINT_PATH),
             sam2_finetuned_checkpoint_path=str(SAM2_FINETUNED_CHECKPOINT_PATH),
-            use_sam2=use_sam2_feature,
+            use_sam2=use_sam2_feature, # use_sam2_feature is globally determined before this
             debug=True
         )
-        return analyzer
+        return analyzer_obj
     except Exception as e:
         error_msg = f"Error loading model: {str(e)}"
         logger.error(error_msg)
         import traceback
         trace_msg = f"Traceback: {traceback.format_exc()}"
         logger.error(trace_msg)
-        st.error(error_msg)
+        st.error(error_msg) # Display error in Streamlit UI
         st.error(trace_msg)
         return None
 
-# Initialize the circuit analyzer
-analyzer = load_circuit_analyzer()
+analyzer = None # Initialize analyzer variable
 
-# Check if analyzer loaded successfully before proceeding
-if analyzer is None:
-    logger.error("Circuit analyzer failed to initialize. Stopping application.")
-    st.stop()  # Stop the app if model loading failed
+if not st.session_state.circuit_analyzer_loaded_flag:
+    loader_placeholder = st.empty()
+    loader_html = """
+    <div class='initial-loader-container'>
+        <div class='initial-loader-content'>
+            <div class='circuit-model-loader'> 
+                <div></div>
+                <div></div>
+                <div></div>
+            </div>
+            <p style='margin-top: 10px;'>Loading Circuit Analyzer models, please wait...</p>
+        </div>
+    </div>
+    """
+    loader_placeholder.markdown(loader_html, unsafe_allow_html=True)
+    
+    analyzer_instance = load_circuit_analyzer() # Call the cached function
+    
+    loader_placeholder.empty() # Clear the custom loader
+
+    if analyzer_instance is None:
+        # Error message is already shown by load_circuit_analyzer via st.error
+        logger.error("Circuit analyzer failed to initialize (custom loader). Stopping application.")
+        st.stop() # Stop the app if model loading failed
+    else:
+        analyzer = analyzer_instance
+        st.session_state.circuit_analyzer_object_storage = analyzer_instance
+        st.session_state.circuit_analyzer_loaded_flag = True
+        logger.info("Circuit analyzer initialized successfully (custom loader). Application ready.")
+        
+        # Show toast notification for model loading status
+        if not st.session_state.model_load_toast_shown:
+            if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
+                st.toast("✅ Models loaded successfully (including SAM2).")
+            else:
+                # This condition implies models loaded, but SAM2 might be off or had an issue.
+                # use_sam2_feature (checked during CircuitAnalyzer init) determines if SAM2 checkpoint files were found.
+                if use_sam2_feature: # SAM2 files were found, but it's still not active on analyzer
+                    st.toast("✅ Core models loaded. SAM2 initialized but may not be fully active.", icon="⚠️")
+                else: # SAM2 files were not found initially
+                    st.toast("✅ Core models loaded. SAM2 features disabled (model files not found).", icon="⚠️")
+            st.session_state.model_load_toast_shown = True
 else:
-    logger.info("Circuit analyzer initialized successfully. Application ready.")
+    analyzer = st.session_state.circuit_analyzer_object_storage
 
-logger.info("--"*60)
-logger.info("--"*60)
+# Final check: if analyzer is still None, something went wrong.
+# This should ideally be caught by the st.stop() above.
+if analyzer is None:
+    st.error("FATAL: Circuit Analyzer is not available. Application cannot continue.", icon="🚨")
+    logger.critical("FATAL: Analyzer object is None after loading logic. Forcing stop.")
+    st.stop()
+
+# logger.info("--"*60) # Original log lines, can be kept or removed
+# logger.info("--"*60)
 
 # Create containers for results
 if 'active_results' not in st.session_state:
@@ -199,13 +251,16 @@ with file_upload_container:
         help="For best results, use a clear image"
     )
 
-# Show SAM2 status
-if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
-    if not st.session_state.get('model_load_toast_shown', False):
-        st.toast("✅ Model loaded successfully")
-        st.session_state.model_load_toast_shown = True
-else:
-    st.warning("⚠️ Model loading failed")
+# Show SAM2 status -- THIS BLOCK IS NOW HANDLED BY THE TOAST ABOVE, CAN BE REMOVED OR COMMENTED
+# if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
+#     if not st.session_state.get('model_load_toast_shown', False):
+#         st.toast("✅ Model loaded successfully")
+#         st.session_state.model_load_toast_shown = True
+# else:
+#     # This part is tricky because if analyzer is None, app would have stopped.
+#     # If analyzer exists but use_sam2 is False, a warning is appropriate.
+#     if analyzer is not None: # Redundant given the hard stop above, but safe
+#         st.warning("⚠️ SAM2 features may be disabled or model loading was incomplete if this message persists.")
 
 # Process uploaded file
 if uploaded_file is not None:    
@@ -470,12 +525,9 @@ if st.session_state.active_results['original_image'] is not None:
                     st.info("LLaMA input images attribute ('last_llama_input_images') not found on analyzer. Ensure CircuitAnalyzer initializes this attribute in debug mode.")
                 elif not analyzer.last_llama_input_images: # This means the dict exists but is empty
                     st.info("LLaMA input images dictionary is empty. Although debug mode appears active, no images were stored by CircuitAnalyzer during LLaMA processing. This might indicate an issue within CircuitAnalyzer's image storing logic for this debug feature.")
-                    # For further debugging, you might want to inspect these values if you modify CircuitAnalyzer:
-                    # st.write(f"Analyzer debug status from app: {getattr(analyzer, 'debug', 'Not set')}")
-                    # st.write(f"Keys in analyzer.last_llama_input_images: {list(analyzer.last_llama_input_images.keys()) if hasattr(analyzer, 'last_llama_input_images') else 'Attribute missing'}")
                 else:
                     # This is the success case: bboxes exist, attribute exists, and dict is not empty
-                    st.markdown("For each component analyzed by LLaMA for semantic direction, the cropped image sent to the model is shown below, along with the interpretation.")
+                    st.success("results success")
                     
                     found_at_least_one_image_to_display = False
                     for comp_bbox in st.session_state.active_results['bboxes']:
@@ -496,26 +548,14 @@ if st.session_state.active_results['original_image'] is not None:
                             elif yolo_class in analyzer.current_source_classes_names and semantic_reason == "SIGN":
                                 interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
                             
-                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}` (UID: {component_uid})"
+                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}`"
                             
-                            # Display in columns: image on left, text on right
-                            img_col, text_col = st.columns([1, 2]) 
-                            with img_col:
-                                st.image(llama_input_image, width=100, caption=f"Input for UID: {component_uid}")
-                            
-                            with text_col:
-                                st.markdown(f"- {output_line}", unsafe_allow_html=True)
-                            
-                            st.markdown("---") # Separator for each component entry
+                            st.image(llama_input_image, width=100)
+                            st.markdown(output_line, unsafe_allow_html=True)
                             found_at_least_one_image_to_display = True
                     
                     if not found_at_least_one_image_to_display:
                         st.info("LLaMA input images are available in the analyzer, but no components in the current results have matching UIDs with stored images or the required semantic direction information to display their specific LLaMA input image.")
-                        # For further debugging:
-                        # if hasattr(analyzer, 'last_llama_input_images'):
-                        #     st.write("Available LLaMA image UIDs in analyzer:", list(analyzer.last_llama_input_images.keys()))
-                        # uids_in_bboxes = [b.get('uid') for b in st.session_state.active_results.get('bboxes', []) if b.get('uid')]
-                        # st.write("UIDs in current bboxes with semantic_direction:", [b.get('uid') for b in st.session_state.active_results.get('bboxes', []) if b.get('uid') and b.get('semantic_direction')])
         
         else:
             st.info("Run analysis to see component detection")
@@ -585,7 +625,7 @@ if st.session_state.active_results['original_image'] is not None:
         with col1_main_netlist:
             st.markdown("### Initial Netlist") # (This is with LLaMA directions)
             if 'valueless_netlist_text' in st.session_state.active_results:
-                st.code(st.session_state.active_results['valueless_netlist_text'], language="rust")
+                st.code(st.session_state.active_results['valueless_netlist_text'], language="verilog")
             else:
                 st.info("Initial netlist not available.")
 
@@ -593,7 +633,7 @@ if st.session_state.active_results['original_image'] is not None:
             st.markdown("### Final Netlist") # (After VLM Stage 2)
             if st.session_state.final_netlist_generated and 'netlist_text' in st.session_state.active_results:
                 # MODIFIED: Use st.code for displaying the final netlist
-                st.code(st.session_state.active_results['netlist_text'], language="rust")
+                st.code(st.session_state.active_results['netlist_text'], language="verilog")
             elif not st.session_state.final_netlist_generated:
                 st.info("Click 'Get Final Netlist' button above to generate.")
             else:
@@ -633,8 +673,7 @@ if st.session_state.active_results['original_image'] is not None:
             are_different_initials = True
         
         if are_different_initials:
-            with st.expander("🔍 Differences in Initial Netlists (LLaMA vs. No LLaMA)"):
-                st.markdown("Details of Differences:")
+            with st.expander("⇄ Initial Netlist Differences"):
                 lines_llama = netlist_llama_text.splitlines()
                 lines_no_llama = netlist_no_llama_text.splitlines()
                 num_lines_llama = len(lines_llama)
@@ -648,18 +687,8 @@ if st.session_state.active_results['original_image'] is not None:
 
                     if line_l_content != line_nl_content:
                         any_line_diff_shown = True
-                        st.markdown(f"**Line {i+1}:**")
-                        if line_l_content is not None:
-                            st.markdown(f"  - With LLaMA:    `{line_l_content}`")
-                        else:
-                            st.markdown(f"  - With LLaMA:    *Line not present*")
-                        
-                        if line_nl_content is not None:
-                            st.markdown(f"  - Without LLaMA: `{line_nl_content}`")
-                        else:
-                            st.markdown(f"  - Without LLaMA: *Line not present*")
-                        st.markdown("") # Add a little space
-
+                        st.markdown(f"**Line {i+1}:** `{line_l_content}` → `{line_nl_content}`")
+                
                 if not any_line_diff_shown:
                     st.markdown("The netlists are marked as different, but no specific line-by-line variances were rendered. This could be due to subtle differences like trailing whitespace. The initial netlist (with LLaMA) is shown above.")
         
@@ -733,7 +762,7 @@ if st.session_state.active_results['original_image'] is not None:
             st.session_state.ac_frequency = ac_frequency_hz # Update session state with the input value
 
 
-        if st.button("Run SPICE Analysis"):
+        if st.button("Run SPICE Analysis", type="secondary"):
             try: # General try for the button action
                 if st.session_state.analysis_mode == "DC (.op)":
                     perform_dc_spice_analysis(st.session_state.editable_netlist_content, logger)
