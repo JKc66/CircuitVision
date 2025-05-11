@@ -1,21 +1,29 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
+<h1 align="center">CircuitVision</h1>
+<p align="center"><em>Visualize and analyze electronic circuits with ease.</em></p>
+
 <p align="center">
   <img width="40%" src="static/images/CircuitVision.png" />
 </p>
 
 <p align="center">
   <a href="https://app.jawadk.me/circuits/" target="_blank">
-    <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
+    <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
+  </a>
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
-  <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?style=for-the-badge&cacheBust=2" />
-</a>
-
-
-  <a href="https://github.com/JKc66/CircuitVision/issues">
-    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision?style=for-the-badge" />
+    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?style=for-the-badge&cacheBust=2" />
   </a>
 </p>
+<p align="center">
+  <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
+    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision?style=for-the-badge" />
+  </a>
+  <a href="https://deepwiki.com/JKc66/CircuitVision" target="_blank">
+    <img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" />
+  </a>
+</p>
+
 <p align="center">
   <a href="https://github.com/mah-sam">
     <img alt="Mahmoud" src="https://img.shields.io/badge/Mahmoud-100000?style=for-the-badge&logo=github&logoColor=white&labelColor=black" />
