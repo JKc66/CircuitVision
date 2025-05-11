@@ -16,9 +16,13 @@ import streamlit as st
 import openai
 import base64
 import io
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 components_dict = {
     'gnd': 'Ground: A reference point in an electrical circuit. Its value is None.',
