@@ -13,6 +13,22 @@
     display: none !important;
 }
 
+/* Reduce space above banner */
+.main > div:first-child {
+    padding-top: 0.5rem !important;
+}
+
+/* Adjust spacing for the first image (banner) */
+.main > div:first-child img {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* Style inline code (text between backticks) */
+code {
+    color: #FF8C00 !important; /* Change to red color instead of default green */
+   
+}
 
 /* Style for Streamlit expander (dropdown) - General */
 div[data-testid="stExpander"] {

@@ -1008,29 +1008,82 @@ class CircuitAnalyzer():
                          if len(node_data['components']) == max_connections_node_val]
 
         chosen_ground_node_old_id = None
-        if len(nodes_with_max) == 1:
-            chosen_ground_node_old_id = nodes_with_max[0]
-        else: 
-            source_connected_nodes_for_ground = []
-            # Check against bboxes_relative_to_mask for source components as they have original class names
-            for node_id_candidate in nodes_with_max:
-                # Components stored in valid_nodes are from bboxes_relative_to_mask, so they have correct class for source check
-                components_in_node = valid_nodes[node_id_candidate]['components']
-                if any(comp['class'] in self.source_components for comp in components_in_node):
-                    contour_detail_for_node = next((c for c in contours if c['id'] == node_id_candidate), None)
-                    if contour_detail_for_node:
-                         # Use centroid y of contour_detail_for_node (which is in resized space)
-                         rect_x, rect_y, rect_w, rect_h = contour_detail_for_node['rectangle']
-                         source_connected_nodes_for_ground.append((node_id_candidate, rect_y + rect_h / 2))
-            
-            if source_connected_nodes_for_ground:
-                source_connected_nodes_for_ground.sort(key=lambda x: -x[1]) # Higher Y in image (lower on schematic) is preferred for ground
-                chosen_ground_node_old_id = source_connected_nodes_for_ground[0][0]
-            elif nodes_with_max: # If no sources, but still candidates for ground
-                chosen_ground_node_old_id = nodes_with_max[0]
-            else: # Should not be reached if valid_nodes is not empty
-                chosen_ground_node_old_id = list(valid_nodes.keys())[0] if valid_nodes else None 
         
+        # New Ground Selection Logic:
+        # 1. Find all valid nodes connected to a source.
+        all_source_connected_candidates = []
+        for node_id_candidate, node_data_candidate in valid_nodes.items():
+            if any(comp['class'] in self.source_components for comp in node_data_candidate['components']):
+                contour_detail = next((c for c in contours if c['id'] == node_id_candidate), None)
+                if contour_detail:
+                    M = cv2.moments(contour_detail['contour'])
+                    if M["m00"] != 0:
+                        cY = int(M["m01"] / M["m00"])
+                        all_source_connected_candidates.append({'id': node_id_candidate, 'centroid_y': cY})
+                    else:
+                        all_source_connected_candidates.append({'id': node_id_candidate, 'centroid_y': -float('inf')}) # Should not happen
+                else:
+                    all_source_connected_candidates.append({'id': node_id_candidate, 'centroid_y': -float('inf')}) # Should not happen
+
+        if all_source_connected_candidates:
+            if self.debug:
+                print(f"Debug GroundChoice: all_source_connected_candidates BEFORE sort: {all_source_connected_candidates}")
+            # 2. From source-connected nodes, pick the one lowest on the screen (largest centroid_y).
+            all_source_connected_candidates.sort(key=lambda x: x['centroid_y'], reverse=True)
+            if self.debug:
+                print(f"Debug GroundChoice: all_source_connected_candidates AFTER sort: {all_source_connected_candidates}")
+            chosen_ground_node_old_id = all_source_connected_candidates[0]['id']
+            if self.debug:
+                chosen_centroid_y_val = all_source_connected_candidates[0]['centroid_y']
+                print(f"Debug GroundChoice: CHOSEN old_id_for_ground={chosen_ground_node_old_id} with centroid_y={chosen_centroid_y_val}")
+        else:
+            # Fallback if no source-connected nodes are found (unlikely for valid circuits)
+            # Use the previous fallback: from nodes_with_max, pick the lowest.
+            # If nodes_with_max is also problematic, pick the lowest of all valid_nodes.
+            if nodes_with_max:
+                if len(nodes_with_max) > 1:
+                    nodes_with_max_details = []
+                    for node_id_candidate in nodes_with_max:
+                        contour_detail = next((c for c in contours if c['id'] == node_id_candidate), None)
+                        if contour_detail:
+                            M = cv2.moments(contour_detail['contour'])
+                            if M["m00"] != 0:
+                                cY = int(M["m01"] / M["m00"])
+                                nodes_with_max_details.append({'id': node_id_candidate, 'centroid_y': cY})
+                            else:
+                                nodes_with_max_details.append({'id': node_id_candidate, 'centroid_y': -float('inf')})
+                        else:
+                             nodes_with_max_details.append({'id': node_id_candidate, 'centroid_y': -float('inf')})
+                    
+                    if nodes_with_max_details:
+                        nodes_with_max_details.sort(key=lambda x: x['centroid_y'], reverse=True)
+                        chosen_ground_node_old_id = nodes_with_max_details[0]['id']
+                    else: 
+                        chosen_ground_node_old_id = nodes_with_max[0]
+                else: 
+                    chosen_ground_node_old_id = nodes_with_max[0]
+            elif valid_nodes: # Ultimate fallback: lowest of all valid nodes
+                valid_nodes_details = []
+                for node_id_candidate in valid_nodes.keys():
+                    contour_detail = next((c for c in contours if c['id'] == node_id_candidate), None)
+                    if contour_detail:
+                        M = cv2.moments(contour_detail['contour'])
+                        if M["m00"] != 0:
+                            cY = int(M["m01"] / M["m00"])
+                            valid_nodes_details.append({'id': node_id_candidate, 'centroid_y': cY})
+                        else:
+                            valid_nodes_details.append({'id': node_id_candidate, 'centroid_y': -float('inf')})
+                    else:
+                        valid_nodes_details.append({'id': node_id_candidate, 'centroid_y': -float('inf')})
+                if valid_nodes_details:
+                    valid_nodes_details.sort(key=lambda x: x['centroid_y'], reverse=True)
+                    chosen_ground_node_old_id = valid_nodes_details[0]['id']
+                else:
+                     chosen_ground_node_old_id = list(valid_nodes.keys())[0] if valid_nodes else None
+            # Ensure chosen_ground_node_old_id is not None if valid_nodes exist
+            if chosen_ground_node_old_id is None and valid_nodes:
+                chosen_ground_node_old_id = list(valid_nodes.keys())[0] # Default to first valid node
+
         new_nodes_list = []
         if chosen_ground_node_old_id is not None and chosen_ground_node_old_id in valid_nodes:
             new_nodes_list.append({
@@ -1130,6 +1183,7 @@ class CircuitAnalyzer():
                 }
                 component_semantic_direction = component.get('semantic_direction', 'UNKNOWN')
                 persistent_uid = component.get('persistent_uid')
+                semantic_reason = component.get('semantic_reason', 'UNKNOWN') # Get the reason
 
                 if not persistent_uid: # Should always have this
                     if self.debug: print(f"Warning: Component {component_class} missing persistent_uid. Skipping.")
@@ -1142,9 +1196,29 @@ class CircuitAnalyzer():
                     continue
                     
                 processed_components.add(persistent_uid)
-                component_type_prefix = self.netlist_map.get(component_class, 'UN')
+                # Determine component_type_prefix considering semantic_reason
+                yolo_class = component_class # Original class from YOLO
+                reason = component.get('semantic_reason', 'UNKNOWN')
+                prospective_prefix = self.netlist_map.get(yolo_class, 'UN') # Default prefix
+
+                if yolo_class in self.voltage_classes_names and reason == "ARROW":
+                    # If YOLO said voltage but LLaMA saw an arrow, treat as current source for prefix
+                    # Assuming independent current source for now, map to 'I'
+                    # Dependent sources might have other symbols (diamond) which LLaMA isn't specifically looking for yet
+                    prospective_prefix = 'I' 
+                    if self.debug:
+                        print(f"InitialNetlist: YOLO class '{yolo_class}' with reason ARROW. Using prefix 'I'. UID: {persistent_uid}")
+                elif yolo_class in self.current_source_classes_names and reason == "SIGN":
+                    # If YOLO said current but LLaMA saw a sign, treat as voltage source for prefix
+                    prospective_prefix = 'V'
+                    if self.debug:
+                        print(f"InitialNetlist: YOLO class '{yolo_class}' with reason SIGN. Using prefix 'V'. UID: {persistent_uid}")
+
+                component_type_prefix = prospective_prefix
                 
-                if not component_type_prefix:
+                if not component_type_prefix: # Should be caught by default 'UN' earlier if mapping failed
+                    if self.debug:
+                        print(f"Warning: Component {yolo_class} resulted in empty component_type_prefix. Skipping UID {persistent_uid}.")
                     continue
                     
                 # Find the other node this component is connected to
@@ -1174,11 +1248,12 @@ class CircuitAnalyzer():
                     # Determine primary and secondary nodes using semantic direction
                     # The component_bbox is already in the same coordinate space as centroids.
                     primary_centroid, secondary_centroid = self._get_terminal_nodes_relative_to_bbox(
-                        component_bbox, 
+                        component, # Pass the full component dict
                         component_semantic_direction, 
                         current_node_centroid, 
                         other_node_centroid, 
-                        component_class
+                        component_class,
+                        semantic_reason # Pass the reason
                     )
                     
                     # Map back from centroids to original node IDs
@@ -1197,12 +1272,11 @@ class CircuitAnalyzer():
                     else:
                          true_node = assigned_node1_id # Assume this is the actual connection point
                     node_1, node_2 = true_node, 0
-                elif assigned_node1_id == 0: # If primary directed node is ground
-                    node_1, node_2 = assigned_node2_id, 0
-                elif assigned_node2_id == 0: # If secondary directed node is ground
-                    node_1, node_2 = assigned_node1_id, 0
+                # For other components, directly use the assigned primary and secondary nodes
+                # The directionality is already embedded in assigned_node1_id (N+) and assigned_node2_id (N-)
                 else:
-                    node_1, node_2 = assigned_node1_id, assigned_node2_id
+                    node_1 = assigned_node1_id
+                    node_2 = assigned_node2_id
                 
                 # For AC sources, value might be complex (e.g. "10V:30deg"), handle later by Gemini.
                 # For DC sources, value could be simple voltage.
@@ -1356,19 +1430,21 @@ class CircuitAnalyzer():
         img_byte_arr = img_byte_arr.getvalue()
         return base64.b64encode(img_byte_arr).decode('utf-8')
 
-    def _get_terminal_nodes_relative_to_bbox(self, component_bbox, semantic_direction, 
-                                             node1_centroid, node2_centroid, component_class_name):
+    def _get_terminal_nodes_relative_to_bbox(self, component_data, # Changed from component_bbox
+                                             semantic_direction_arg, 
+                                             node1_centroid, node2_centroid, component_class_name_arg,
+                                             semantic_reason_arg="UNKNOWN"): 
         """
         Determines which node centroid corresponds to the primary terminal of a component 
         based on its semantic direction and bounding box.
 
         Args:
-            component_bbox (dict): The component's bounding box {'xmin', 'ymin', 'xmax', 'ymax'}
-                                   in the same coordinate system as node centroids.
-            semantic_direction (str): "UP", "DOWN", "LEFT", "RIGHT", or "UNKNOWN".
+            component_data (dict): The full component dictionary, including coordinates, class, UID, etc.
+            semantic_direction_arg (str): "UP", "DOWN", "LEFT", "RIGHT", or "UNKNOWN".
             node1_centroid (tuple): (x, y) coordinates of the first connected node's centroid.
             node2_centroid (tuple): (x, y) coordinates of the second connected node's centroid.
-            component_class_name (str): The class name (e.g., 'voltage.dc', 'diode').
+            component_class_name_arg (str): The class name (e.g., 'voltage.dc', 'diode') from the component_data.
+            semantic_reason_arg (str): "SIGN", "ARROW", or "UNKNOWN". Default is "UNKNOWN".
 
         Returns:
             tuple: (primary_node_centroid, secondary_node_centroid) if direction is clear,
@@ -1380,50 +1456,77 @@ class CircuitAnalyzer():
             # Should not happen if nodes are valid
             return node1_centroid, node2_centroid 
 
-        xmin, ymin, xmax, ymax = component_bbox['xmin'], component_bbox['ymin'], component_bbox['xmax'], component_bbox['ymax']
-        center_x, center_y = (xmin + xmax) / 2, (ymin + ymax) / 2
-        width, height = xmax - xmin, ymax - ymin
+        # Extract needed info from component_data
+        component_class_name = component_data.get('class', component_class_name_arg) 
+        persistent_uid_debug = component_data.get('persistent_uid')
 
-        ref_point = None
         is_diode = component_class_name in self.diode_classes_names
-        is_voltage_source = component_class_name in self.voltage_classes_names # Covers V, Battery, Dep. V
-        is_current_source = component_class_name in self.current_source_classes_names # Covers I, Dep. I
+        is_yolo_voltage_source = component_class_name in self.voltage_classes_names
+        is_yolo_current_source = component_class_name in self.current_source_classes_names 
 
-        # Determine the reference point on the component symbol that represents the "primary" terminal
-        # For voltage sources, this is the positive (+) terminal.
-        # For current sources, this is where current flows FROM.
-        # For diodes, this is the ANODE (base of the triangle).
-        if semantic_direction == "UP":
-            if is_voltage_source: ref_point = (center_x, ymax)      # + is at bottom
-            elif is_current_source: ref_point = (center_x, ymax)   # Arrow from bottom
-            elif is_diode: ref_point = (center_x, ymax)           # Anode at bottom
-        elif semantic_direction == "DOWN":
-            if is_voltage_source: ref_point = (center_x, ymin)      # + is at top
-            elif is_current_source: ref_point = (center_x, ymin)   # Arrow from top
-            elif is_diode: ref_point = (center_x, ymin)           # Anode at top
-        elif semantic_direction == "LEFT":
-            if is_voltage_source: ref_point = (xmax, center_y)      # + is at right
-            elif is_current_source: ref_point = (xmax, center_y)   # Arrow from right
-            elif is_diode: ref_point = (xmax, center_y)           # Anode at right
-        elif semantic_direction == "RIGHT":
-            if is_voltage_source: ref_point = (xmin, center_y)      # + is at left
-            elif is_current_source: ref_point = (xmin, center_y)   # Arrow from left
-            elif is_diode: ref_point = (xmin, center_y)           # Anode at left
-        
-        if ref_point is None or semantic_direction == "UNKNOWN":
-            if self.debug and semantic_direction != "UNKNOWN":
-                 print(f"Warning: Could not determine ref_point for {component_class_name} with direction {semantic_direction}. Using default node order.")
-            # Fallback: no clear direction or not a type we reorder this way, return original order
+        acts_like_arrow = is_yolo_current_source or (is_yolo_voltage_source and semantic_reason_arg == "ARROW")
+        acts_like_sign_voltage = is_yolo_voltage_source and semantic_reason_arg != "ARROW"
+
+        if self.debug:
+            print(f"NodeOrderDebug for {component_class_name}, UID: {persistent_uid_debug}:")
+            print(f"  semantic_direction_arg: {semantic_direction_arg}, semantic_reason_arg: {semantic_reason_arg}")
+            print(f"  is_yolo_voltage_source: {is_yolo_voltage_source}, is_yolo_current_source: {is_yolo_current_source}, is_diode: {is_diode}")
+            print(f"  acts_like_arrow: {acts_like_arrow}, acts_like_sign_voltage: {acts_like_sign_voltage}")
+            print(f"  Condition for default: {semantic_direction_arg == 'UNKNOWN' or not (acts_like_arrow or acts_like_sign_voltage or is_diode)}")
+
+        primary_node_candidate1 = node1_centroid # n1_in
+        secondary_node_candidate1 = node2_centroid # n2_in
+
+        if semantic_direction_arg == "UNKNOWN" or not (acts_like_arrow or acts_like_sign_voltage or is_diode):
+            if self.debug and semantic_direction_arg != "UNKNOWN":
+                 print(f"Warning: Node ordering for {component_class_name} (reason: {semantic_reason_arg}) with direction {semantic_direction_arg} not explicitly handled. Using default node order.")
             return node1_centroid, node2_centroid
 
-        # Calculate squared Euclidean distances to avoid sqrt
-        dist1_sq = (node1_centroid[0] - ref_point[0])**2 + (node1_centroid[1] - ref_point[1])**2
-        dist2_sq = (node2_centroid[0] - ref_point[0])**2 + (node2_centroid[1] - ref_point[1])**2
+        n1x, n1y = node1_centroid
+        n2x, n2y = node2_centroid
 
-        if dist1_sq < dist2_sq:
-            return node1_centroid, node2_centroid # Node1 is closer to the primary terminal reference
+        swapped = False
+        
+        # Log inputs to decision logic for the specific component if its UID matches
+        if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+            print(f"UID_MATCH_DEBUG ({persistent_uid_debug}): n1_in={node1_centroid}, n2_in={node2_centroid}, dir={semantic_direction_arg}")
+
+        if semantic_direction_arg == "UP": 
+            comparison_result = n1y < n2y
+            if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+                print(f"UID_MATCH_DEBUG (UP): n1y({n1y}) < n2y({n2y}) is {comparison_result}")
+            if comparison_result: 
+                swapped = True
+        elif semantic_direction_arg == "DOWN": 
+            comparison_result = n1y > n2y
+            if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+                print(f"UID_MATCH_DEBUG (DOWN): n1y({n1y}) > n2y({n2y}) is {comparison_result}")
+            if comparison_result: 
+                swapped = True
+        elif semantic_direction_arg == "LEFT": 
+            comparison_result = n1x < n2x
+            if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+                print(f"UID_MATCH_DEBUG (LEFT): n1x({n1x}) < n2x({n2x}) is {comparison_result}")
+            if comparison_result: 
+                swapped = True
+        elif semantic_direction_arg == "RIGHT": 
+            comparison_result = n1x > n2x
+            if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+                print(f"UID_MATCH_DEBUG (RIGHT): n1x({n1x}) > n2x({n2x}) is {comparison_result}")
+            if comparison_result: 
+                swapped = True
+        else: 
+            if self.debug:
+                print(f"Debug: Unhandled semantic_direction '{semantic_direction_arg}' in node ordering. Defaulting.")
+            return node1_centroid, node2_centroid
+
+        if self.debug and persistent_uid_debug == 'voltage.ac_919_239_1025_341':
+            print(f"UID_MATCH_DEBUG ({persistent_uid_debug}): final swapped={swapped}")
+
+        if swapped:
+            return secondary_node_candidate1, primary_node_candidate1 # node2 becomes primary
         else:
-            return node2_centroid, node1_centroid # Node2 is closer
+            return primary_node_candidate1, secondary_node_candidate1 # node1 remains primary
 
     def _get_semantic_direction_from_llama(self, component_crop_rgb, component_class_name):
         """
@@ -1433,14 +1536,19 @@ class CircuitAnalyzer():
         if not self.groq_client:
             if self.debug:
                 print("Groq client not available. Skipping LLaMA direction analysis.")
-            return None
+            return "UNKNOWN", "UNKNOWN"
 
         base64_image = self._encode_image_for_llama(component_crop_rgb)
         prompt = None
         model_to_use = "meta-llama/llama-4-scout-17b-16e-instruct" 
 
         if component_class_name in self.voltage_classes_names:
-            prompt = """Analyze this voltage source image.
+            prompt = """Analyze this electrical circuit component image which shows a voltage source.
+
+Focus on identifying the following key elements:
+1. The + (plus) and - (minus) symbols or voltage arrow if present
+2. Their relative positions in the image (top, bottom, left, right)
+
 Return a JSON object with these fields:
 - symbol_positions: Describe the exact locations of + and - symbols. If there's a voltage arrow instead, write "ARROW"
 - direction: ONE of [UP, DOWN, LEFT, RIGHT] determined by these rules:
@@ -1485,11 +1593,11 @@ Example responses:
         else:
             if self.debug:
                 print(f"No specific LLaMA prompt for component class: {component_class_name}. Skipping LLaMA.")
-            return None # Not a component type we analyze for direction with LLaMA with these prompts
+            return "UNKNOWN", "UNKNOWN" # Not a component type we analyze for direction with LLaMA with these prompts
 
         try:
             if self.debug:
-                print(f"Querying LLaMA ({model_to_use}) for direction of {component_class_name}...")
+                print(f"LLaMA_QUERY_V3 ({model_to_use}) for direction of {component_class_name}...")
             
             llm_start_time = time.time()
             chat_completion = self.groq_client.chat.completions.create(
@@ -1516,7 +1624,7 @@ Example responses:
             response_content = chat_completion.choices[0].message.content
             
             if self.debug:
-                print(f"LLaMA response for {component_class_name} (took {llm_time:.2f}s): {response_content}")
+                print(f"LLaMA_RESPONSE_V3 for {component_class_name} (took {llm_time:.2f}s): {response_content}")
             
             parsed_response = json.loads(response_content)
             # The direction field seems to be directly the value like "UP", "DOWN" etc.
@@ -1524,16 +1632,19 @@ Example responses:
             # but we are primarily interested in the 'direction' field for the netlist.
             # We will prioritize the 'direction' field if present.
             direction = parsed_response.get("direction")
-            if direction:
-                 return str(direction).upper()
+            reason = parsed_response.get("reason") # Get the reason
+
+            if direction: # Only return reason if direction is valid
+                 return str(direction).upper(), str(reason).upper() if reason else "UNKNOWN" # Return both
             else:
                 if self.debug:
-                    print(f"LLaMA response for {component_class_name} did not contain a 'direction' field. Full response: {parsed_response}")
-                return "UNKNOWN" # Fallback if direction field is missing
+                    print(f"LLaMA_RESPONSE_V3_NO_DIRECTION for {component_class_name}. Full response: {parsed_response}")
+                return "UNKNOWN", "UNKNOWN" # Fallback on error for both
             
         except Exception as e:
-            print(f"Error during LLaMA call for {component_class_name} direction: {e}")
-            return "UNKNOWN" # Fallback on error
+            if self.debug: # Added this check for consistency
+                print(f"LLaMA_ERROR_V3 for {component_class_name} direction: {e}")
+            return "UNKNOWN", "UNKNOWN" # Fallback on error for both
 
     def _enrich_bboxes_with_directions(self, image_rgb, bboxes):
         """
@@ -1587,23 +1698,31 @@ Example responses:
                     if self.debug:
                         print(f"Skipping LLaMA for {component_string_class_name} due to invalid crop dimensions: {bbox}")
                     bbox['semantic_direction'] = 'UNKNOWN'
+                    bbox['semantic_reason'] = 'UNKNOWN'
                     continue
 
                 component_crop_rgb = image_rgb[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
                 
                 if component_crop_rgb.size == 0:
                     if self.debug:
-                        print(f"Skipping LLaMA for {component_string_class_name} due to empty crop: {bbox}")
-                    bbox['semantic_direction'] = 'UNKNOWN'
+                        print(f"Skipping LLaMA for {component_string_class_name} due to empty crop: {bbox.get('persistent_uid')}")
+                    bbox['semantic_direction'] = 'UNKNOWN' # Explicitly string UNKNOWN
+                    bbox['semantic_reason'] = 'UNKNOWN'
                     continue
 
-                # Get semantic direction from LLaMA
-                # Pass the string class name for prompt selection logic inside the helper
-                direction = self._get_semantic_direction_from_llama(component_crop_rgb, component_string_class_name)
-                bbox['semantic_direction'] = direction if direction else "UNKNOWN"
+                # Get semantic direction and reason from LLaMA
+                direction_from_llama, reason_from_llama = self._get_semantic_direction_from_llama(component_crop_rgb, component_string_class_name)
+                
                 if self.debug:
-                    print(f"Component {bbox.get('persistent_uid', '')} class {component_string_class_name} got semantic_direction: {bbox['semantic_direction']}")
+                    print(f"EnrichDebug UID {bbox.get('persistent_uid')}: LLaMA returned dir='{direction_from_llama}', reason='{reason_from_llama}'")
+
+                bbox['semantic_direction'] = direction_from_llama # Directly assign what LLaMA helper returned
+                bbox['semantic_reason'] = reason_from_llama   # Directly assign
+                
+                if self.debug:
+                    print(f"EnrichDebug UID {bbox.get('persistent_uid')}: Stored in bbox dir='{bbox['semantic_direction']}', reason='{bbox['semantic_reason']}'")
             else:
                 # For components not analyzed for direction, set a default or skip
                 bbox['semantic_direction'] = None
+                bbox['semantic_reason'] = None # Ensure reason is also None
         # No explicit return, bboxes list is modified in-place.

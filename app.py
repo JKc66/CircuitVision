@@ -784,17 +784,22 @@ if st.session_state.active_results['original_image'] is not None:
     is_uploaded_file = current_image_path and UPLOAD_DIR in current_image_path
 
     # Step 1: Image and Component Detection side by side
-    st.markdown("## 📊 Analysis Results")
+    st.markdown("## 📈 Analysis Results")
     
     # Display analysis time if available
     if 'elapsed_time' in st.session_state.active_results:
-        if 'detailed_timings' in st.session_state.active_results and st.session_state.active_results['detailed_timings']:
-            expander_label = f"✅ Analysis completed in {st.session_state.active_results['elapsed_time']:.2f} seconds - Click to see details"
-            st.markdown("<div class='detailed-timings-expander'>", unsafe_allow_html=True)
-            with st.expander(expander_label):
-                for step, duration in st.session_state.active_results['detailed_timings'].items():
-                    st.markdown(f"- **{step}**: {duration:.2f} seconds")
-            st.markdown("</div>", unsafe_allow_html=True)
+        expander_label = f"⏱️ Analysis Time: {st.session_state.active_results['elapsed_time']:.2f}s (Expand for step details)"
+        st.markdown("<div class='detailed-timings-expander'>", unsafe_allow_html=True)
+        with st.expander(expander_label):
+            detailed_timings = st.session_state.active_results['detailed_timings']
+            if detailed_timings:
+                table_data = ["| Step | Duration (s) |", "| :--- | :----------- |"]
+                for step, duration in detailed_timings.items():
+                    table_data.append(f"| {step} | {duration:.2f} |")
+                st.markdown("\n".join(table_data), unsafe_allow_html=True)
+            else:
+                st.info("No detailed timing information available.")
+        st.markdown("</div>", unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     
@@ -808,11 +813,13 @@ if st.session_state.active_results['original_image'] is not None:
             img = Image.open(current_image_path) # Use current_image_path
             h, w = st.session_state.active_results['original_image'].shape[:2]
             st.markdown("### Basic Properties")
-            st.markdown(f"- **Size**: {w}x{h} pixels")
-            st.markdown(f"- **Format**: {img.format}")
-            st.markdown(f"- **Mode**: {img.mode}")
-            if 'uploaded_file_name' in st.session_state.active_results:
-                st.markdown(f"- **Name**: {st.session_state.active_results['uploaded_file_name']}")
+            st.markdown(f"- **Size**: `{w}x{h}` pixels")
+            st.markdown(f"- **Format**: `{img.format}`")
+            st.markdown(f"- **Mode**: `{img.mode}`")
+            if 'uploaded_file_name' in st.session_state.active_results and st.session_state.active_results['uploaded_file_name'] is not None:
+                st.markdown(f"- **Name**: `{st.session_state.active_results['uploaded_file_name']}`")
+            else:
+                st.markdown(f"- **Name**: `N/A`")
             
             # EXIF data section
             st.markdown("### EXIF Data")
@@ -837,7 +844,7 @@ if st.session_state.active_results['original_image'] is not None:
                     else:
                         st.info("No important EXIF tags found in this image.")
                 else:
-                    st.info("ℹ️ This image does not contain any EXIF metadata. This is normal for images that have been processed, screenshots, or images saved without preserving metadata.")
+                    st.info("ℹ️ No EXIF metadata found. (Common for processed images/screenshots)")
             except Exception as e:
                 st.warning(f"Could not read EXIF data: {str(e)}")
                 logger.error(f"Error displaying EXIF data: {str(e)}")
@@ -846,29 +853,40 @@ if st.session_state.active_results['original_image'] is not None:
         # End of "Image Details" expander
 
     # New, separate expander for Cropping Debug Information
-    with st.expander("Cropping Debug Information"):
+    with st.expander("✂️ Cropping Details"): # Updated title
         crop_info = st.session_state.active_results.get('crop_debug_info')
         if crop_info:
             if crop_info.get('crop_applied'):
-                st.success("Cropping was applied successfully.")
+                st.success("✅ Cropping applied successfully.")
             else:
-                st.warning(f"Cropping was NOT applied. Reason: {crop_info.get('reason_for_no_crop', 'Unknown')}")
+                st.warning(f"⚠️ Cropping NOT applied. Reason: {crop_info.get('reason_for_no_crop', 'Unknown')}")
             
-            st.markdown(f"- **Original Image Dimensions (WxH)**: {crop_info.get('original_image_dims', 'N/A')}")
-            st.markdown(f"- **SAM2 Extent Bbox (Crop Defining Bbox)**: {crop_info.get('defining_bbox', 'N/A')}")
-            st.markdown(f"- **Padding Value Used**: {crop_info.get('padding_value', 'N/A')}")
-            st.markdown(f"- **Initial Calculated Window (After Padding, Before Text)**: {crop_info.get('initial_calculated_window_before_text', 'N/A')}")
+            orig_dims_tuple = crop_info.get('original_image_dims', ('N/A', 'N/A'))
+            cropped_dims_tuple = crop_info.get('cropped_image_dims', ('N/A', 'N/A'))
+            # Ensure they are tuples for consistent string representation
+            orig_dims_str = f"({orig_dims_tuple[0]}, {orig_dims_tuple[1]})" if isinstance(orig_dims_tuple, tuple) and len(orig_dims_tuple) == 2 else str(orig_dims_tuple)
+            cropped_dims_str = f"({cropped_dims_tuple[0]}, {cropped_dims_tuple[1]})" if isinstance(cropped_dims_tuple, tuple) and len(cropped_dims_tuple) == 2 else str(cropped_dims_tuple)
+
+            st.markdown(f"**Dimensions (Original WxH → Cropped WxH):** `{orig_dims_str}` → `{cropped_dims_str}`")
+
+            st.markdown("**Crop Definition:**")
+            st.markdown(f"- SAM2 Extent Bbox: `{crop_info.get('defining_bbox', 'N/A')}`")
+            st.markdown(f"- Padding Applied: `{crop_info.get('padding_value', 'N/A')}px`") # Added px for clarity
+            st.markdown(f"- Initial Window (Post-Padding): `{crop_info.get('initial_calculated_window_before_text', 'N/A')}`")
             
             text_expanders = crop_info.get('text_bboxes_that_expanded_crop', [])
             if text_expanders:
-                st.markdown("- **Text Bboxes that Expanded Crop**:")
+                st.markdown(f"**Text-based Expansion:** {len(text_expanders)} text region(s) expanded the crop area.")
+                # Using st.markdown with manual list formatting for consistent indentation
+                expansion_details = ""
                 for i, txt_bbox_info in enumerate(text_expanders):
-                    st.markdown(f"  - Text Box {i+1}: UID=`{txt_bbox_info.get('uid')}`, Coords=`{txt_bbox_info.get('coords_text_box_abs')}`")
+                    expansion_details += f"  - Text Box {i+1}: UID=`{txt_bbox_info.get('uid')}`, Coords=`{txt_bbox_info.get('coords_text_box_abs')}`\n"
+                st.markdown(expansion_details)
             else:
-                st.markdown("- **No text bboxes caused crop expansion**.")
+                st.markdown("**Text-based Expansion:** No text regions further expanded the crop area.")
             
-            st.markdown(f"- **Final Absolute Crop Window (xmin, ymin, xmax, ymax)**: {crop_info.get('final_crop_window_abs', 'N/A')}")
-            st.markdown(f"- **Cropped Image Dimensions (WxH)**: {crop_info.get('cropped_image_dims', 'N/A')}")
+            st.markdown(f"**Final Crop Window (xmin, ymin, xmax, ymax):** `{crop_info.get('final_crop_window_abs', 'N/A')}`")
+            
         else:
             st.info("No cropping debug information available (crop may not have run or info not stored).")
 
@@ -897,18 +915,33 @@ if st.session_state.active_results['original_image'] is not None:
             # Expander for LLaMA Stage 1 (Direction) Debug Output
             with st.expander("↗️ Debug: LLaMA Directions"):
                 if 'bboxes' in st.session_state.active_results and st.session_state.active_results['bboxes']:
-                    directions_data = []
+                    output_lines = []
                     for comp_bbox in st.session_state.active_results['bboxes']:
+                        # Only include components for which LLaMA analysis was attempted
                         if 'semantic_direction' in comp_bbox and comp_bbox['semantic_direction'] is not None:
-                            directions_data.append({
-                                "Persistent UID": comp_bbox.get('persistent_uid', 'N/A'),
-                                "YOLO Class": comp_bbox.get('class', 'N/A'),
-                                "Semantic Direction": comp_bbox['semantic_direction']
-                            })
-                    if directions_data:
-                        st.table(directions_data)
+                            yolo_class = comp_bbox.get('class', 'N/A')
+                            semantic_direction = comp_bbox['semantic_direction']
+                            semantic_reason = comp_bbox.get('semantic_reason', 'N/A')
+                            
+                            interpreted_type = yolo_class # Default to YOLO class
+                            # Determine interpreted type based on YOLO class and semantic reason
+                            if yolo_class in analyzer.voltage_classes_names and semantic_reason == "ARROW":
+                                # Infer current source if a voltage source has an arrow
+                                interpreted_type = "current.ac" if ".ac" in yolo_class else "current.dc"
+                            elif yolo_class in analyzer.current_source_classes_names and semantic_reason == "SIGN":
+                                # Infer voltage source if a current source has a sign
+                                interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
+                            
+                            # Construct the string in the new format
+                            # Example: voltage.dc `DOWN` ; `SIGN` --> voltage.dc
+                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}`"
+                            output_lines.append(output_line)
+                            
+                    if output_lines:
+                        # Join with newlines, each line already starts with '- '
+                        st.markdown("\n".join([f"- {line}" for line in output_lines]), unsafe_allow_html=True)
                     else:
-                        st.info("No semantic directions were determined or available in the processed bboxes.")
+                        st.info("No semantic directions/reasons were determined or available in the processed bboxes.")
                 else:
                     st.info("Processed component bounding boxes ('bboxes') not available in session state.")
         
@@ -937,14 +970,14 @@ if st.session_state.active_results['original_image'] is not None:
             
             with debug_col1:
                 if st.session_state.active_results['node_mask'] is not None:
-                    st.image(st.session_state.active_results['node_mask'], caption="Emptied Mask", use_container_width=True)
+                    st.image(st.session_state.active_results['node_mask'], caption="`Emptied Mask`", use_container_width=True)
             
             with debug_col2:
                 if st.session_state.active_results['enhanced_mask'] is not None:
-                    st.image(st.session_state.active_results['enhanced_mask'], caption="Enhanced Mask", use_container_width=True)
+                    st.image(st.session_state.active_results['enhanced_mask'], caption="`Enhanced Mask`", use_container_width=True)
             
             if st.session_state.active_results['node_visualization'] is not None:
-                st.image(st.session_state.active_results['node_visualization'], caption="Final Node Connections", use_container_width=True)
+                st.image(st.session_state.active_results['node_visualization'], caption="`Final Node Connections`", use_container_width=True)
     
     # Step 3: Netlist
     if st.session_state.active_results.get('netlist_text') is not None:
@@ -1057,7 +1090,7 @@ if st.session_state.active_results['original_image'] is not None:
         with st.expander("🔍 Debug: VLM"):
             st.markdown("### Image Sent to VLM")
             if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
-                st.image(st.session_state.active_results['enum_img'], caption="Image sent for VLM Stage 2 analysis")
+                st.image(st.session_state.active_results['enum_img'], caption="`Image sent for VLM Stage 2 analysis`")
             else:
                 st.info("Enumerated image for VLM not available.")
                 
