@@ -83,9 +83,22 @@ The development trajectory since the introduction of Non-Maximum Suppression (NM
     *   **Clustering Fallback:** Implemented a fallback mechanism: if the density-based clustering algorithm (e.g., DBSCAN) fails to produce a valid result (e.g., no clusters found, or all points classified as noise), the system utilizes the original, unclustered corner points. This ensures that the analysis can proceed even if clustering is not optimal.
     *   **Enhanced Diagnostics:** Incorporated more descriptive warning messages during the corner detection phase to facilitate debugging of complex or problematic images. (Tracked in commit `db0e3d05`)
 
-### D. Netlist Generation and AI-Powered Value Extraction
+### D. Netlist Generation and AI-Powered Value Extraction (Multi-Stage AI Process)
 
-#### 1. Gemini-Powered Component Value Extraction
+The generation of the final, usable netlist involves a sophisticated multi-stage process, leveraging different AI models for specific tasks, significantly enhanced by the changes in commit `orin`. The `editable_netlist_content` session state variable was also introduced in commit `orin` to store the current netlist text as it evolves through these stages, serving as the primary source for UI display and subsequent SPICE analysis.
+
+#### 1. Stage 1: LLaMA-Powered Semantic Direction Enrichment (Commit `orin`)
+*   **Purpose:** To automatically determine the semantic orientation of directional components (e.g., anode/cathode for diodes, positive/negative terminals for polarized capacitors or sources) *before* full netlist generation. This helps in creating a more accurate initial netlist, especially regarding the order of connection nodes.
+*   **Technical Implementation (Commit `orin`):**
+    *   **Timing:** This step occurs after the initial YOLO component detection and Non-Maximum Suppression (NMS), but *before* SAM2-based intelligent cropping. It operates on the `bboxes_orig_coords_nms` (bounding boxes in original image coordinates).
+    *   **Mechanism:** The `analyzer._enrich_bboxes_with_directions` method is called. This method internally uses a LLaMA model (accessed via the Groq API client) to analyze image patches corresponding to each detected component.
+    *   **Output:** The LLaMA model provides a `semantic_direction` (e.g., "LEFT_TO_RIGHT", "TOP_TO_BOTTOM", "ANODE_LEFT", "CATHODE_RIGHT") which is then added as an attribute to the respective bounding box dictionary.
+    *   **Preservation:** This `semantic_direction` attribute is preserved through subsequent deep copies and adjustments of bounding boxes if/when image cropping occurs.
+    *   **Utilization:** The `generate_netlist_from_nodes` function in `CircuitAnalyzer` utilizes this `semantic_direction` to infer the correct order of `node_1` and `node_2` for directional components when constructing the initial netlist. The resulting text of this netlist (valueless but with LLaMA-informed directions) is the first content to populate `st.session_state.editable_netlist_content`.
+    *   **Comparison Netlist:** For debugging and assessing the impact of LLaMA directions, a separate version of the initial netlist is generated *without* applying these semantic directions (`valueless_netlist_text_no_llama_dir`).
+*   **Fallback:** If the LLaMA enrichment step fails or the Groq client is unavailable (e.g., `GROQ_API_KEY` missing or `analyzer.groq_client` is not properly initialized), the system logs a warning and proceeds without semantic directions. In this case, the netlist generation relies on default node ordering.
+
+#### 2. Stage 2: Gemini-Powered Component Value and Type Extraction (VLM)
 *   **Previous State (Value Extraction):** Component values were often not extracted, or the system relied on rudimentary OCR or template matching, which resulted in frequent omissions or inaccuracies in the final netlist.
 *   **Technical Enhancement (Multi-Stage Process):**
     *   **Foundation & Initial API Integration (Commit `eeca9ac8`):** The groundwork for AI-powered value extraction was laid. This involved:
@@ -96,13 +109,13 @@ The development trajectory since the introduction of Non-Maximum Suppression (NM
         *   The prompt sent to the Gemini model was significantly optimized for better accuracy and structured JSON output (tracked in `9b321d16`).
         *   An alternative endpoint via OpenRouter (`gemini_labels_openrouter`) was added (likely via merge `83a49854` or related commits), providing flexibility.
     *   **Integrated Workflow:** The full multi-stage process was established, involving:
-        1.  Generating an initial "valueless" netlist based on geometric analysis.
-        2.  Creating an enumerated version of the (potentially cropped) analysis image.
-        3.  Submitting this image to the selected Gemini endpoint (`gemini_labels` or `gemini_labels_openrouter`) using the optimized prompt.
-        4.  Parsing the structured JSON response from Gemini.
-        5.  Enriching the initial netlist with the extracted component types and values (using `analyzer.fix_netlist` which correlates results via component IDs/UIDs).
+        1.  Generating an initial "valueless" netlist based on geometric analysis **and LLaMA-derived semantic directions (Stage 1)**.
+        2.  Creating an enumerated version of the (potentially cropped) analysis image (`enum_img`).
+        3.  Submitting this `enum_img` to the selected Gemini endpoint (`gemini_labels_openrouter` as per commit `orin`'s `app.py` changes) using the optimized prompt.
+        4.  Parsing the structured JSON response from Gemini. The raw response from the VLM is stored in `st.session_state.active_results['vlm_stage2_output']` for debugging purposes (introduced in commit `orin`).
+        5.  Enriching the initial netlist with the extracted component types and values (using `analyzer.fix_netlist` which correlates results via component IDs/UIDs). The `st.session_state.editable_netlist_content` is then updated with the text of this new, value-enriched netlist.
 
-#### 2. Netlist Data Refinement and Validation
+#### 3. Stage 3: Netlist Data Refinement and Validation
 *   **Challenge:** The raw netlist, even after Gemini enrichment, could contain entries with `None` for values, or exhibit improperly formatted lines for specific component types (e.g., current sources lacking complete node connection data).
 *   **Solution:** Implemented robust correlation, filtering, and validation logic:
     *   **Correlation & Initial Fixes (Commit `57d5db22` from V2_SAM):** The `fix_netlist` function was significantly enhanced to correlate Gemini's output (based on visual IDs) with the geometrically derived netlist components (using `persistent_uid` via the enumerated bounding boxes). This commit implemented the core logic for updating component `value` (if initially None), correcting `class` based on Gemini's identification, recalculating `component_num` upon class change, and specifically handling ground (`gnd`) connections by setting `node_2` to 0 and adjusting string formatting.
@@ -128,8 +141,12 @@ The development trajectory since the introduction of Non-Maximum Suppression (NM
     *   The final node connection graph/visualization is rendered.
     *   The SAM2 segmentation output (typically a colored instance mask) is displayed, allowing verification of the segmentation quality.
     *   An expandable UI section provides access to **intermediate debug images** from the node analysis module. This includes the "Emptied Mask" (the SAM2 mask after component areas have been removed), the "Enhanced Mask" (potentially after morphological operations), and the "Contour Image" (used for trace finding).
-*   **Comparative Netlist Display:** Both the **initial (valueless) geometric netlist** and the **final (Gemini-enriched) netlist** are presented side-by-side, facilitating direct comparison and verification of the value extraction process.
-*   **Gemini Interaction Debug:** An expander section reveals the **enumerated image** that was dispatched to the Gemini model, aiding in debugging the AI-based value extraction step.
+*   **Comparative Netlist Display:** The UI presents the **initial netlist (informed by LLaMA semantic directions from Stage 1 of netlist generation)** and the **final, value-enriched netlist (after VLM Stage 2 processing)** side-by-side, using `st.code` with "rust" language highlighting. This allows users to track the netlist evolution from its initial structural form to the final, analyzable version.
+*   **LLaMA Semantic Direction Debug (Commit `orin`):** A new expander titled "↗️ Debug: LLaMA Directions" was added within the "Component Detection" column. It displays a table of components (from `st.session_state.active_results['bboxes']`, which are relative to `image_for_analysis`) with their `persistent_uid`, YOLO class, and the `semantic_direction` determined by the LLaMA model in Stage 1 of netlist generation. This aids in understanding how component orientations were inferred prior to node ordering in the initial netlist.
+*   **Initial Netlist Comparison Debug (Commit `orin`):** An expander "🔍 Differences in Initial Netlists (LLaMA vs. No LLaMA)" was introduced under the main netlist display. If the LLaMA-directed initial netlist (`valueless_netlist_text`) differs from one generated without LLaMA directions (`valueless_netlist_text_no_llama_dir` - generated internally for this comparison), this section shows a line-by-line diff, helping assess the impact of the LLaMA Stage 1 enrichment.
+*   **VLM Interaction Debug (Commit `orin` enhancement):** The expander for debugging the VLM stage (Stage 2 of netlist generation) was enhanced and titled "🔍 Debug: VLM". It now displays:
+    *   The **enumerated image** (`enum_img` from `st.session_state.active_results`) that was dispatched to the VLM (Gemini) model for value and type extraction.
+    *   The **raw VLM analysis output** (the list of dictionaries/JSON received from Gemini) stored in `st.session_state.active_results['vlm_stage2_output']`, formatted as a Python list of dicts using `st.code`. This provides direct insight into the VLM's response before it's parsed and integrated by `fix_netlist`.
 *   General UI styling and layout improvements were implemented for a more intuitive and informative user experience.
 
 ### C. SPICE Analysis Integration
@@ -159,4 +176,6 @@ The development trajectory since the introduction of Non-Maximum Suppression (NM
     *   **Granular Logging:** Significantly increased the detail, scope, and consistency of logging across the application's lifecycle. This provides better traceability for the analysis process and aids in pinpointing issues.
     *   **Robust Error Handling:** Implemented more specific and resilient error handling mechanisms, particularly during critical phases like model loading and intensive analysis steps.
     *   **Graceful Failure on Input Issues:** Improved the handling of edge cases related to input data, such as attempts to process missing or corrupt image files. The application now fails more gracefully, providing informative error messages to the user or logs.
+    *   **Log Verbosity Reduction (Commit `orin`):** Suppressed verbose logging output from the `groq._base_client` by setting its log level to `WARNING`. This helps to reduce noise in the application logs, making it easier to find relevant information.
+    *   **Log Message Clarification (Commit `orin`):** An existing logging message related to the automatic processing of example images was clarified. The message now more accurately reflects the condition where an example is not processed because the last processed item was an upload, even if the widget selection for the example itself did not change.
     *   *Note: The changes in commits `0919b581` ("caption"), `a51ec07b` ("classes"), and `f268692e` ("44") are understood to contribute to these overarching stability and refinement efforts. More specific technical details for these commits would require further code review.* 
