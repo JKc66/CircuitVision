@@ -1562,7 +1562,8 @@ class CircuitAnalyzer():
         if semantic_direction_arg == "UNKNOWN" or not (acts_like_arrow or acts_like_sign_voltage or is_diode):
             if self.debug and semantic_direction_arg != "UNKNOWN":
                  print(f"Warning: Node ordering for {component_class_name} (reason: {semantic_reason_arg}) with direction {semantic_direction_arg} not explicitly handled. Using default node order.")
-            return node1_centroid, node2_centroid
+            # SWAPPED: Default to node2_centroid (non-ground) as primary, node1_centroid (ground) as secondary
+            return node2_centroid, node1_centroid
 
         n1x, n1y = node1_centroid
         n2x, n2y = node2_centroid
