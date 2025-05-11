@@ -49,14 +49,14 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 ## ✨ Key Features & The Engineering Behind Them
 
 ### 👁️ Advanced Component Detection (Fine-Tuned YOLOv11)
-* Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images.
+* Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images. **We obtained a mean average percision (mAp-50) of 0.9313, which is on bar of SOTA detection models.**
 * Employs Non-Maximum Suppression (NMS) based on confidence scores to eliminate redundant detections, ensuring a clean and precise component map.
 * Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
 
 ### 📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)
-* Integrates an **adapted Segment Anything Model 2 (SAM 2)**. We've tailored its application to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background.
+* Integrates an innovatively fine-tuned large foundation model, **Segment Anything Model 2 (SAM 2)** on a very small dataset (267 images) to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background. **Obtaining an Acuuracy of 98.7%**.  (This work will be submitted to a journal soon).
 * The input image and the SAM 2 binary mask are intelligently cropped based on the segmented circuit's extent (with optimal padding). This crucial step focuses all subsequent analyses (node detection, value extraction) solely on the relevant circuit area, significantly boosting performance and reducing noise.
-* In scenarios where SAM 2 processing is unavailable or disabled, the system gracefully defaults to analyzing the original, uncropped image.
+
 
 ### 🔗 Custom-Developed Node & Connection Analysis
 * Our **custom-developed node connection algorithm** leverages the SAM 2-generated binary mask (after excluding component areas) and the adjusted YOLO bounding boxes. This allows for superior precision in identifying conductive traces and connection nodes within the **electrical circuit**.
