@@ -54,7 +54,7 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 * Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
 
 ### 📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)
-* Integrates an innovatively fine-tuned large foundation model, **Segment Anything Model 2 (SAM 2)** on a very small dataset (267 images) to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background. **Obtaining an Acuuracy of 98.7%**.  (This work will be submitted to a journal soon).
+* Integrates an innovatively fine-tuned large foundation model, **Segment Anything Model 2 (SAM 2)** on a very small dataset (267 images) to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background. **Obtaining an Accuracy of 98.7%**.  (This work will be submitted to a journal soon).
 * The input image and the SAM 2 binary mask are intelligently cropped based on the segmented circuit's extent (with optimal padding). This crucial step focuses all subsequent analyses (node detection, value extraction) solely on the relevant circuit area, significantly boosting performance and reducing noise.
 
 
