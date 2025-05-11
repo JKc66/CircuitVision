@@ -1,28 +1,31 @@
 import torch
-import numpy as np
-import cv2
-import shutil
 import streamlit as st
 import logging
 import os
 import time
-from PIL import Image, ImageOps
-from PIL.ExifTags import TAGS
-from src.utils import (summarize_components,
-                        gemini_labels,
-                        gemini_labels_openrouter,
-                        non_max_suppression_by_confidence,
-                        create_annotated_image,
-                        calculate_component_stats
-                        )
-from src.circuit_analyzer import CircuitAnalyzer
-from copy import deepcopy
-from PySpice.Spice.Parser import SpiceParser
-from PySpice.Unit import *
-from PySpice.Unit import u_Hz
-from PySpice.Unit.Unit import UnitValue
 import re
-import matplotlib.pyplot as plt
+from PIL import Image
+from src.utils import (
+            create_annotated_image,
+            calculate_component_stats,
+            load_css,
+            format_exif_data
+            )
+from src.circuit_analyzer import CircuitAnalyzer
+from src.analysis_pipeline import (
+    process_new_upload,
+    run_initial_detection_and_enrichment,
+    run_segmentation_and_cropping,
+    run_node_analysis,
+    run_initial_netlist_generation,
+    log_analysis_summary,
+    handle_final_netlist_generation
+)
+from src.spice_simulator import (
+    perform_dc_spice_analysis,
+    perform_ac_spice_analysis
+)
+
 
 
 # Configure logging
@@ -63,74 +66,6 @@ st.set_page_config(
     }
 )
 
-# Function to load custom CSS
-def load_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-# Function to auto-rotate image based on EXIF orientation tag
-def auto_rotate_image(image_path):
-    """
-    Opens an image, checks for EXIF orientation tag, and rotates the image accordingly.
-    Returns the rotated PIL Image object, or the original if no rotation is needed/possible.
-    """
-    try:
-        image = Image.open(image_path)
-        exif = image._getexif()
-        
-        # If there's no EXIF data or no orientation tag, return the original image
-        if not exif or 0x0112 not in exif:  # 0x0112 is the orientation tag ID
-            return image
-        
-        orientation = exif[0x0112]
-        logger.info(f"Auto-rotating image with orientation tag: {orientation}")
-        
-        rotated_image = ImageOps.exif_transpose(image)
-        return rotated_image
-    except Exception as e:
-        logger.error(f"Error auto-rotating image: {str(e)}")
-        return Image.open(image_path)
-
-# Function to format EXIF data for better display
-def format_value(value):
-    """Format values for display, handling binary data appropriately"""
-    if isinstance(value, bytes):
-        return f"[Binary data, {len(value)} bytes]"
-    elif isinstance(value, str):
-        cleaned = ''.join(c for c in value if c.isprintable())
-        return cleaned if cleaned else "[Empty string]"
-    return value
-
-def format_exif_data(image_path):
-    """
-    Extracts and formats key EXIF data from an image for display.
-    Returns a dictionary of important EXIF tags or None if no data is found.
-    """
-    try:
-        img = Image.open(image_path)
-        
-        # Define important tags we want to show
-        important_tags = {
-            'Software',
-            'Orientation'
-        }
-        
-        exif_data = {}
-        try:
-            exif = img._getexif()
-            if exif:
-                for tag_id, value in exif.items():
-                    tag = TAGS.get(tag_id, tag_id)
-                    if tag in important_tags:
-                        exif_data[tag] = format_value(value)
-        except Exception as e:
-            logger.warning(f"Error getting EXIF with _getexif(): {e}")
-            
-        return exif_data if exif_data else None
-        
-    except Exception as e:
-        logger.error(f"Error formatting EXIF data: {str(e)}")
-        return None
 
 # Load custom CSS
 load_css("static/css/main.css")
@@ -147,12 +82,6 @@ SAM2_FINETUNED_CHECKPOINT_PATH_OBJ = os.path.join(BASE_DIR, 'models/SAM2/best_mi
 SAM2_CONFIG_PATH = "/" + os.path.abspath(SAM2_CONFIG_PATH_OBJ)  # Config path needs leading slash for Hydra
 SAM2_BASE_CHECKPOINT_PATH = os.path.abspath(SAM2_BASE_CHECKPOINT_PATH_OBJ)
 SAM2_FINETUNED_CHECKPOINT_PATH = os.path.abspath(SAM2_FINETUNED_CHECKPOINT_PATH_OBJ)
-
-# logger.info(f"Base directory: {BASE_DIR}")
-# logger.info(f"YOLO model path: {YOLO_MODEL_PATH}")
-# logger.info(f"SAM2 config path: {SAM2_CONFIG_PATH}")
-# logger.info(f"SAM2 base checkpoint path: {SAM2_BASE_CHECKPOINT_PATH}")
-# logger.info(f"SAM2 finetuned checkpoint path: {SAM2_FINETUNED_CHECKPOINT_PATH}")
 
 
 # Create necessary directories
@@ -279,189 +208,12 @@ else:
     st.warning("⚠️ Model loading failed")
 
 # Process uploaded file
-if uploaded_file is not None:
-    # Generate a consistent image path for the uploaded file
-    disk_image_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-    
+if uploaded_file is not None:    
     # Only reset results if a new file is uploaded
     if st.session_state.get('previous_upload_name') != uploaded_file.name:
         st.session_state.previous_upload_name = uploaded_file.name
+        process_new_upload(uploaded_file, UPLOAD_DIR, logger)
         
-        # Log a clear separator for debugging
-        logger.info("="*80)
-        logger.info(f"NEW IMAGE UPLOADED: {uploaded_file.name}")
-        logger.info("="*80)
-        
-        # Convert image
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB for display
-        
-        # Clear results when new image is uploaded
-        st.session_state.active_results = {
-            'bboxes': None,
-            'nodes': None,
-            'netlist': None,
-            'netlist_text': None,
-            'original_image': image,
-            'uploaded_file_type': uploaded_file.type,
-            'uploaded_file_name': uploaded_file.name,
-            'annotated_image': None,
-            'component_stats': None,
-            'node_visualization': None,
-            'node_mask': None,
-            'enhanced_mask': None,
-            'contour_image': None,
-            'corners_image': None,
-            'sam2_output': None,
-            'valueless_netlist_text': None,
-            'enum_img': None,
-            'detailed_timings': {},
-            'image_path': disk_image_path
-        }
-        
-        # Reset the final netlist generation flag
-        st.session_state.final_netlist_generated = False
-        
-        # Store original image
-        st.session_state.active_results['original_image'] = image
-        
-        # Clear and save files
-        if os.path.exists(UPLOAD_DIR):
-            shutil.rmtree(UPLOAD_DIR)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        
-        # Save using PIL to preserve EXIF data
-        pil_image = Image.open(uploaded_file)
-            
-        # Auto-rotate the image based on EXIF orientation tag
-        logger.info(f"Checking EXIF orientation for {uploaded_file.name}")
-        try:
-            exif = pil_image._getexif()
-            if exif and 0x0112 in exif:  # 0x0112 is the orientation tag ID
-                orientation = exif[0x0112]
-                logger.info(f"Found orientation tag: {orientation}")
-                if orientation != 1:  # If orientation is not normal
-                    logger.info(f"Auto-rotating image with orientation {orientation}")
-                    pil_image = ImageOps.exif_transpose(pil_image)
-                    # Update the numpy array image as well
-                    image = np.array(pil_image)
-                    st.session_state.active_results['original_image'] = image
-        except Exception as e:
-            logger.error(f"Error checking/rotating image based on EXIF: {str(e)}")
-        
-        # Save the processed image, preserving EXIF data
-        exif_bytes = pil_image.info.get('exif')
-        if exif_bytes:
-            pil_image.save(disk_image_path, format=pil_image.format, exif=exif_bytes)
-            logger.info(f"Saved image {disk_image_path} with EXIF data ({len(exif_bytes)} bytes).")
-        else:
-            pil_image.save(disk_image_path, format=pil_image.format)
-            logger.info(f"Saved image {disk_image_path} without EXIF data (EXIF not found in PIL image after processing).")
-        
-        # Automatically trigger analysis
-        st.session_state.start_analysis_triggered = True
-        st.session_state.analysis_in_progress = True
-
-
-def safe_to_complex(value):
-    """
-    Safely convert PySpice values to complex numbers for AC analysis.
-    
-    Args:
-        value: A value that could be a PySpice.Unit.Unit.UnitValue, int, float, or complex
-        
-    Returns:
-        complex: A Python complex number
-    """
-    try:
-        # If it's already a complex number
-        if isinstance(value, complex):
-            print(f"DEBUG safe_to_complex: Input is already complex: {value}")
-            return value
-            
-        # If it's a PySpice UnitValue, extract the numerical value
-        if hasattr(value, 'value'):
-            print(f"DEBUG safe_to_complex: Input is UnitValue. value.value is: {value.value}, type: {type(value.value)}")
-            return complex(value.value)
-            
-        # If it's a simple number type
-        if isinstance(value, (int, float)):
-            print(f"DEBUG safe_to_complex: Input is int/float: {value}")
-            return complex(value)
-            
-        # Try generic conversion as last resort
-        print(f"DEBUG safe_to_complex: Trying generic complex() conversion for: {value}, type: {type(value)}")
-        return complex(value)
-        
-    except (ValueError, TypeError, AttributeError) as e:
-        print(f"Warning: Could not convert {type(value)} to complex: {value}, Error: {e}")
-        # Return a default value to prevent further errors
-        return complex(0)
-
-
-
-
-# Helper function to parse AC value strings from VLM
-def _parse_vlm_ac_string(raw_value_str):
-    if not isinstance(raw_value_str, str):
-        return None
-
-    # Pattern to capture: AC <mag_val> <mag_unit> <freq_val> <freq_unit> <phase_val> <phase_unit>
-    # Example: "AC 5V 1kHz 0deg" -> mag=5, phase=0
-    # Example: "AC 10.5mA 50.2Hz -45.5deg" -> mag=10.5, phase=-45.5
-    pattern_long = re.compile(
-        r"AC\s*"                                      # "AC "
-        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"     # Magnitude value and optional unit
-        r"(?:[+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩHz°]*\s*" # Frequency value and optional unit (non-capturing)
-        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*",   # Phase value and optional unit
-        re.IGNORECASE
-    )
-    match_long = pattern_long.match(raw_value_str.strip())
-    if match_long:
-        try:
-            mag_str = match_long.group(1)
-            phase_str = match_long.group(2) # Phase is the second captured group
-            mag = float(mag_str)
-            phase = float(phase_str)
-            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
-        except (IndexError, ValueError):
-            pass # Will try other patterns
-
-    # Fallback for "AC <mag_val><unit> <phase_val><unit>" if freq is missing
-    # Example: "AC 5V 0deg"
-    pattern_short = re.compile(
-        r"AC\s*"
-        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"  # Magnitude value and optional unit
-        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*", # Phase value and optional unit
-        re.IGNORECASE
-    )
-    match_short = pattern_short.match(raw_value_str.strip())
-    if match_short:
-        try:
-            mag_str = match_short.group(1)
-            phase_str = match_short.group(2)
-            mag = float(mag_str)
-            phase = float(phase_str)
-            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
-        except (IndexError, ValueError):
-            pass # Will try other patterns
-    
-    # NEW: Try "<mag>:<phase>" format, e.g., "4:-45" or "1:45"
-    pattern_mag_phase = re.compile(
-        r"\s*([+-]?\d*\.?\d+)\s*:\s*([+-]?\d*\.?\d+)\s*"
-    )
-    match_mag_phase = pattern_mag_phase.fullmatch(raw_value_str.strip())
-    if match_mag_phase:
-        try:
-            mag = float(match_mag_phase.group(1))
-            phase = float(match_mag_phase.group(2))
-            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
-        except (IndexError, ValueError):
-            pass # Should not happen if regex fullmatch succeeds
-
-    return None # If no patterns match
-
 # Analysis logic, executed if triggered
 if st.session_state.get('start_analysis_triggered', False):
     st.session_state.start_analysis_triggered = False # Consume the trigger
@@ -470,9 +222,7 @@ if st.session_state.get('start_analysis_triggered', False):
     if st.session_state.active_results.get('original_image') is None or \
        st.session_state.active_results.get('image_path') is None:
         logger.warning("Analysis triggered, but required image data (original_image or image_path) is missing in active_results.")
-        st.session_state.analysis_in_progress = False # Reset if it was set True by trigger
-        # No st.rerun() here to avoid potential loops if the state isn't fixed by other flows.
-        # The UI will update based on the rerun that triggered this or subsequent user actions.
+        st.session_state.analysis_in_progress = False 
     else:
         try:
             # analysis_in_progress is already True if set by the trigger.
@@ -495,129 +245,29 @@ if st.session_state.get('start_analysis_triggered', False):
                 detailed_timings = {}
                 logger.info("Starting complete circuit analysis...")
                 
-                # Step 1A: Initial Component Detection (YOLO on original image)
-                step_start_time_yolo = time.time()
-                raw_bboxes_orig_coords = []
-                # Ensure original_image is available (already checked above, but good for clarity)
-                if st.session_state.active_results['original_image'] is not None:
-                    logger.debug("Step 1A: Detecting components with YOLO on original image...")
-                    raw_bboxes_orig_coords = analyzer.bboxes(st.session_state.active_results['original_image'])
-                    logger.debug(f"Detected {len(raw_bboxes_orig_coords)} raw bounding boxes on original image")
-                    
-                    # Apply Non-Maximum Suppression to bboxes in original coordinates
-                    bboxes_orig_coords_nms = non_max_suppression_by_confidence(raw_bboxes_orig_coords, iou_threshold=0.6)
-                    logger.debug(f"After NMS: {len(bboxes_orig_coords_nms)} bounding boxes on original image")
-                    st.session_state.active_results['bboxes_orig_coords_nms'] = bboxes_orig_coords_nms
-                else:
-                    # This case should be prevented by the check at the start of this 'if start_analysis_triggered' block
-                    logger.error("No original image found for YOLO detection during analysis.")
-                    st.error("Error: Original image not available for analysis.")
+                # # Step 1A: Initial Component Detection (YOLO on original image)
+                # # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
+                # The two steps above are now combined into run_initial_detection_and_enrichment
+                try:
+                    bboxes_after_enrichment = run_initial_detection_and_enrichment(analyzer, st.session_state.active_results, detailed_timings, logger)
+                    if bboxes_after_enrichment is None:
+                        # Handle error case if run_initial_detection_and_enrichment indicates a critical failure
+                        # For example, if original_image was missing
+                        st.error("Error: Could not perform initial component detection.")
+                        st.session_state.analysis_in_progress = False
+                        loader_placeholder.empty()
+                        st.stop()
+                    # bboxes_orig_coords_nms in st.session_state.active_results is updated by the function
+                except ValueError as ve:
+                    st.error(str(ve))
                     st.session_state.analysis_in_progress = False
-                    loader_placeholder.empty() # Clear loader
-                    st.stop() # Stop further execution in this problematic state
-                detailed_timings['YOLO Component Detection'] = time.time() - step_start_time_yolo
+                    loader_placeholder.empty()
+                    st.stop()
 
-                # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
-                # This step should happen after initial YOLO bbox detection and NMS,
-                # using the bboxes in original image coordinates (bboxes_orig_coords_nms)
-                # and the original image (st.session_state.active_results['original_image'], which should be RGB).
-                can_enrich = (
-                    st.session_state.active_results.get('bboxes_orig_coords_nms') and
-                    st.session_state.active_results.get('original_image') is not None and
-                    hasattr(analyzer, 'groq_client') and analyzer.groq_client # Check if attr exists and then its truthiness
-                )
-                if can_enrich:
-                    logger.info("Attempting to enrich component bboxes with semantic directions from LLaMA...")
-                    step_start_time_llama_enrich = time.time()
-                    try:
-                        # The _enrich_bboxes_with_directions method modifies bboxes_orig_coords_nms in-place.
-                        # These bboxes (now potentially with 'semantic_direction') will then be used in cropping
-                        # and the 'semantic_direction' attribute should be preserved by deepcopy in crop_image_and_adjust_bboxes.
-                        analyzer._enrich_bboxes_with_directions(
-                            st.session_state.active_results['original_image'],
-                            st.session_state.active_results['bboxes_orig_coords_nms']
-                        )
-                        logger.info("Semantic direction enrichment step completed.")
-                        detailed_timings['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich
-                    except Exception as e_enrich:
-                        logger.error(f"Error during LLaMA semantic direction enrichment: {e_enrich}")
-                        st.warning("Could not determine semantic directions for some components using LLaMA.")
-                        detailed_timings['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich # Log time even on failure
-                # If enrichment couldn't happen, log a warning if the basic prerequisites were met but groq_client was the issue.
-                elif (
-                    st.session_state.active_results.get('bboxes_orig_coords_nms') and
-                    st.session_state.active_results.get('original_image') is not None
-                ):
-                    # This implies can_enrich was false, and since bboxes & image are present, 
-                    # it was likely due to groq_client issues (either not an attribute or evaluates to False).
-                    logger.warning("Skipping LLaMA semantic direction enrichment: Groq client not available, analyzer instance might be outdated, or GROQ_API_KEY missing.")
-
-                # Step 1B: SAM2 Segmentation (on original image) & Get SAM2 Extent
-                step_start_time_sam = time.time()
-                full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = None, None, None
-                if st.session_state.active_results['original_image'] is not None and analyzer.use_sam2:
-                    logger.debug("Step 1B: Performing SAM2 segmentation on original image...")
-                    full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = analyzer.segment_with_sam2(
-                        st.session_state.active_results['original_image']
-                    )
-                    st.session_state.active_results['sam2_output'] = sam2_colored_display_output # For display
-                    if sam_extent_bbox:
-                        logger.info(f"SAM2 extent bbox found: {sam_extent_bbox}")
-                    else:
-                        logger.warning("SAM2 did not return a valid extent bbox. Cropping will be skipped.")
-                elif not analyzer.use_sam2:
-                    logger.warning("SAM2 is disabled. Cropping based on SAM2 extent will be skipped.")
-                detailed_timings['SAM2 Segmentation & Extent'] = time.time() - step_start_time_sam
-
-                # Step 1C: Crop based on SAM2 Extent
-                step_start_time_crop = time.time()
-                image_for_analysis = st.session_state.active_results['original_image'] # Default
-                bboxes_for_analysis = st.session_state.active_results.get('bboxes_orig_coords_nms', [])
-                cropped_sam_mask_for_nodes = full_binary_sam_mask # Default to full if no crop
-                # Initialize crop_debug_info in session state before it's potentially set
-                st.session_state.active_results['crop_debug_info'] = None
-
-                if sam_extent_bbox and full_binary_sam_mask is not None:
-                    logger.debug("Attempting to crop image and SAM2 mask based on SAM2 extent...")
-                    cropped_visual_image, adjusted_yolo_bboxes, crop_debug_info = analyzer.crop_image_and_adjust_bboxes(
-                        st.session_state.active_results['original_image'],
-                        st.session_state.active_results['bboxes_orig_coords_nms'],
-                        sam_extent_bbox,
-                        padding=80 
-                    )
-                    st.session_state.active_results['crop_debug_info'] = crop_debug_info # Store the detailed dict
-
-                    if crop_debug_info and crop_debug_info.get('crop_applied'):
-                        image_for_analysis = cropped_visual_image
-                        bboxes_for_analysis = adjusted_yolo_bboxes
-                        
-                        # Crop the full_binary_sam_mask using details from crop_debug_info
-                        final_crop_coords = crop_debug_info.get('final_crop_window_abs') # (xmin, ymin, xmax, ymax)
-                        if final_crop_coords:
-                            crop_x, crop_y, crop_x_max, crop_y_max = final_crop_coords
-                            # Ensure SAM mask is not None before attempting slice
-                            if full_binary_sam_mask is not None:
-                                cropped_sam_mask_for_nodes = full_binary_sam_mask[crop_y : crop_y_max, crop_x : crop_x_max]
-                                logger.info(f"Visual image and SAM2 mask cropped. Cropped SAM mask shape: {cropped_sam_mask_for_nodes.shape}")
-                            else:
-                                logger.warning("Full binary SAM mask is None, cannot crop it.")
-                        else:
-                            logger.warning("Final crop window coordinates not found in crop_debug_info. Cannot crop SAM mask.")
-                            # Fallback: use uncropped SAM mask if crop details are missing but crop was supposedly applied
-                            cropped_sam_mask_for_nodes = full_binary_sam_mask 
-                    elif crop_debug_info and not crop_debug_info.get('crop_applied'):
-                        logger.info(f"Cropping was not applied based on crop_debug_info. Reason: {crop_debug_info.get('reason_for_no_crop', 'Unknown')}. Using originals.")
-                        # image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes remain as defaults
-                    else:
-                        # Should not happen if crop_debug_info is always returned as a dict by the modified function
-                        logger.warning("crop_debug_info was None or malformed after crop_image_and_adjust_bboxes call. Using originals.")
-                else:
-                    logger.info("Skipping crop: SAM2 extent bbox or full mask not available.")
-                
-                st.session_state.active_results['image_for_analysis'] = image_for_analysis
-                st.session_state.active_results['bboxes'] = bboxes_for_analysis # These are primary for node analysis & enum
-                st.session_state.active_results['cropped_sam_mask_for_nodes'] = cropped_sam_mask_for_nodes
-                detailed_timings['Image Cropping'] = time.time() - step_start_time_crop
+                # # Step 1B: SAM2 Segmentation (on original image) & Get SAM2 Extent
+                # # Step 1C: Crop based on SAM2 Extent
+                # These steps are now combined into run_segmentation_and_cropping
+                image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes = run_segmentation_and_cropping(analyzer, st.session_state.active_results, detailed_timings, logger)
 
                 # Step 1D: Create Annotated image for display (on image_for_analysis)
                 annotated_display_image = create_annotated_image(
@@ -633,119 +283,18 @@ if st.session_state.get('start_analysis_triggered', False):
                 # This now includes YOLO, SAM2-Extent, Cropping, and Annotation for display.
                 # For a more direct comparison, sum them up or keep separate as done with detailed_timings.
 
-                # Step 2: Node Analysis (using cropped SAM2 mask and adjusted bboxes)
-                step_start_time_nodes = time.time()
-                if bboxes_for_analysis is not None and cropped_sam_mask_for_nodes is not None and analyzer.use_sam2:
-                    try:
-                        logger.debug("Step 2: Analyzing node connections using cropped SAM mask and adjusted bboxes...")
-                        nodes, emptied_mask, enhanced, contour_image, final_visualization = analyzer.get_node_connections(
-                            image_for_analysis,             # Cropped visual image (for context)
-                            cropped_sam_mask_for_nodes,   # Cropped SAM2 binary mask (for processing)
-                            bboxes_for_analysis           # YOLO bboxes relative to cropped images
-                        )
-                        logger.debug(f"Node analysis completed: {len(nodes)} nodes identified")
-                        st.session_state.active_results['nodes'] = nodes
-                        st.session_state.active_results['node_visualization'] = final_visualization
-                        # The following are debug/intermediate images from node analysis, based on its internal processing scale
-                        st.session_state.active_results['node_mask'] = emptied_mask       # This is based on cropped_sam_mask_for_nodes after component removal
-                        st.session_state.active_results['enhanced_mask'] = enhanced     # Based on resized emptied_mask
-                        st.session_state.active_results['contour_image'] = contour_image  # Based on enhanced mask
+                # # Step 2: Node Analysis (using cropped SAM2 mask and adjusted bboxes)
+                # This step is now in run_node_analysis
+                nodes = run_node_analysis(analyzer, image_for_analysis, cropped_sam_mask_for_nodes, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
+                # `nodes` variable now holds the result, and st.session_state.active_results['nodes'] is also updated within the function.
 
-                    except Exception as e:
-                        error_msg = f"Error during node analysis: {str(e)}"
-                        logger.error(error_msg)
-                        st.error(error_msg)
-                        logger.warning("Continuing execution despite node analysis error")
-                elif not analyzer.use_sam2:
-                    logger.warning("Node analysis skipped: SAM2 is disabled.")
-                    st.warning("Node analysis cannot be performed as SAM2 is disabled.")
-                else:
-                    logger.error("Node analysis skipped: Bounding boxes or cropped SAM2 mask not available.")
-                    st.error("Components or circuit mask not ready for node analysis.")
-                detailed_timings['Node Analysis'] = time.time() - step_start_time_nodes
-                
-                # Step 3: Generate Netlist
-                step_start_time_netlist = time.time()
-                if st.session_state.active_results.get('nodes') is not None:
-                    try:
-                        logger.debug("Step 3: Generating initial netlist...")
-                        valueless_netlist = analyzer.generate_netlist_from_nodes(st.session_state.active_results['nodes'])
-                        valueless_netlist_text = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
-                        logger.debug(f"Generated initial netlist with {len(valueless_netlist)} components")
-                        
-                        st.session_state.active_results['netlist'] = valueless_netlist
-                        st.session_state.active_results['valueless_netlist_text'] = valueless_netlist_text
-                        st.session_state.active_results['netlist_text'] = valueless_netlist_text
-                        st.session_state.editable_netlist_content = valueless_netlist_text
-                        
-                        # --- BEGIN: Generate initial netlist WITHOUT LLaMA directions for comparison ---
-                        try:
-                            logger.debug("Generating initial netlist WITHOUT LLaMA directions for comparison...")
-                            nodes_copy_for_no_llama = deepcopy(st.session_state.active_results['nodes'])
-                            for node_data in nodes_copy_for_no_llama:
-                                for component_in_node in node_data.get('components', []):
-                                    # Neutralize semantic_direction to force default ordering
-                                    component_in_node['semantic_direction'] = "UNKNOWN" # or None
-                            
-                            valueless_netlist_no_llama_dir = analyzer.generate_netlist_from_nodes(nodes_copy_for_no_llama)
-                            valueless_netlist_text_no_llama_dir = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist_no_llama_dir])
-                            st.session_state.active_results['valueless_netlist_text_no_llama_dir'] = valueless_netlist_text_no_llama_dir
-                            logger.debug(f"Generated initial netlist WITHOUT LLaMA directions: {len(valueless_netlist_no_llama_dir)} components")
-                        except Exception as e_no_llama:
-                            logger.error(f"Error generating netlist without LLaMA directions: {e_no_llama}")
-                            st.session_state.active_results['valueless_netlist_text_no_llama_dir'] = "Error generating this version."
-                        # --- END: Generate initial netlist WITHOUT LLaMA directions ---
+                # # Step 3: Generate Netlist
+                # This step is now in run_initial_netlist_generation
+                valueless_netlist = run_initial_netlist_generation(analyzer, nodes, image_for_analysis, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
+                # `valueless_netlist` holds the result, and session state is updated within the function.
 
-                        logger.debug("Enumerating components for later Gemini labeling on (potentially cropped) image_for_analysis...")
-                        enum_img, bbox_ids_with_visual_enum = analyzer.enumerate_components(
-                            image_for_analysis, # This is the potentially SAM2-extent cropped visual image
-                            deepcopy(bboxes_for_analysis) # These bboxes are relative to image_for_analysis and have persistent_uid
-                        )
-                        st.session_state.active_results['enum_img'] = enum_img # Potentially cropped and enumerated image for Gemini
-                        st.session_state.active_results['bbox_ids'] = bbox_ids_with_visual_enum
-                        
-                    except Exception as netlist_error:
-                        error_msg = f"Error generating initial netlist: {str(netlist_error)}"
-                        logger.error(error_msg)
-                        st.error(error_msg)
-                else:
-                    logger.warning("No nodes found for netlist generation")
-                    st.warning("Could not identify connection nodes in the circuit. The netlist may be incomplete.")
-                    
-                    # Still try to generate a basic netlist from bboxes if available
-                    if st.session_state.active_results['bboxes'] is not None:
-                        try:
-                            logger.debug("Attempting to generate basic netlist from components only...")
-                            # Create empty nodes if needed
-                            empty_nodes = []
-                            valueless_netlist = analyzer.generate_netlist_from_nodes(empty_nodes)
-                            st.session_state.active_results['netlist'] = valueless_netlist
-                            st.session_state.active_results['netlist_text'] = '\n'.join([analyzer.stringify_line(line) for line in valueless_netlist])
-                            st.session_state.active_results['valueless_netlist_text'] = st.session_state.active_results['netlist_text']
-                        except Exception as fallback_error:
-                            logger.error(f"Error generating fallback netlist: {str(fallback_error)}")
-                
-                detailed_timings['Netlist Generation'] = time.time() - step_start_time_netlist
-                
-                # Log analysis summary
-                if st.session_state.active_results.get('netlist') and log_level in ['DEBUG', 'INFO']:
-                    try:
-                        component_counts = {}
-                        for line in st.session_state.active_results['netlist']:
-                            comp_type = line['class']
-                            if comp_type not in component_counts:
-                                component_counts[comp_type] = 0
-                            component_counts[comp_type] += 1
-                        
-                        logger.info("Analysis results summary:")
-                        logger.info(f"- Image: {st.session_state.active_results.get('uploaded_file_name', 'Unknown')}")
-                        logger.info(f"- Total components detected: {len(st.session_state.active_results['netlist'])}")
-                        for comp_type, count in component_counts.items():
-                            logger.info(f"  - {comp_type}: {count}")
-                        if st.session_state.active_results.get('nodes'):
-                            logger.info(f"- Total nodes: {len(st.session_state.active_results['nodes'])}")
-                    except Exception as summary_error:
-                        logger.error(f"Error generating analysis summary: {str(summary_error)}")
+                # Log analysis summary (Moved definition earlier, called here)
+                log_analysis_summary(st.session_state.active_results, logger, log_level)
                 
                 # End timing and log the duration
                 overall_end_time = time.time()
@@ -914,36 +463,59 @@ if st.session_state.active_results['original_image'] is not None:
             
             # Expander for LLaMA Stage 1 (Direction) Debug Output
             with st.expander("↗️ Debug: LLaMA Directions"):
-                if 'bboxes' in st.session_state.active_results and st.session_state.active_results['bboxes']:
-                    output_lines = []
+                # Check prerequisites first
+                if 'bboxes' not in st.session_state.active_results or not st.session_state.active_results.get('bboxes'):
+                    st.info("Processed component bounding boxes ('bboxes') not available in session state. Run analysis first.")
+                elif not hasattr(analyzer, 'last_llama_input_images'):
+                    st.info("LLaMA input images attribute ('last_llama_input_images') not found on analyzer. Ensure CircuitAnalyzer initializes this attribute in debug mode.")
+                elif not analyzer.last_llama_input_images: # This means the dict exists but is empty
+                    st.info("LLaMA input images dictionary is empty. Although debug mode appears active, no images were stored by CircuitAnalyzer during LLaMA processing. This might indicate an issue within CircuitAnalyzer's image storing logic for this debug feature.")
+                    # For further debugging, you might want to inspect these values if you modify CircuitAnalyzer:
+                    # st.write(f"Analyzer debug status from app: {getattr(analyzer, 'debug', 'Not set')}")
+                    # st.write(f"Keys in analyzer.last_llama_input_images: {list(analyzer.last_llama_input_images.keys()) if hasattr(analyzer, 'last_llama_input_images') else 'Attribute missing'}")
+                else:
+                    # This is the success case: bboxes exist, attribute exists, and dict is not empty
+                    st.markdown("For each component analyzed by LLaMA for semantic direction, the cropped image sent to the model is shown below, along with the interpretation.")
+                    
+                    found_at_least_one_image_to_display = False
                     for comp_bbox in st.session_state.active_results['bboxes']:
-                        # Only include components for which LLaMA analysis was attempted
-                        if 'semantic_direction' in comp_bbox and comp_bbox['semantic_direction'] is not None:
+                        component_uid = comp_bbox.get('persistent_uid')
+                        # Only include components for which LLaMA analysis was attempted, an image is available, and UID exists
+                        if 'semantic_direction' in comp_bbox and comp_bbox['semantic_direction'] is not None and \
+                           component_uid and component_uid in analyzer.last_llama_input_images:
+                            
+                            llama_input_image = analyzer.last_llama_input_images[component_uid]
+                            
                             yolo_class = comp_bbox.get('class', 'N/A')
                             semantic_direction = comp_bbox['semantic_direction']
                             semantic_reason = comp_bbox.get('semantic_reason', 'N/A')
                             
                             interpreted_type = yolo_class # Default to YOLO class
-                            # Determine interpreted type based on YOLO class and semantic reason
                             if yolo_class in analyzer.voltage_classes_names and semantic_reason == "ARROW":
-                                # Infer current source if a voltage source has an arrow
                                 interpreted_type = "current.ac" if ".ac" in yolo_class else "current.dc"
                             elif yolo_class in analyzer.current_source_classes_names and semantic_reason == "SIGN":
-                                # Infer voltage source if a current source has a sign
                                 interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
                             
-                            # Construct the string in the new format
-                            # Example: voltage.dc `DOWN` ; `SIGN` --> voltage.dc
-                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}`"
-                            output_lines.append(output_line)
+                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}` (UID: {component_uid})"
                             
-                    if output_lines:
-                        # Join with newlines, each line already starts with '- '
-                        st.markdown("\n".join([f"- {line}" for line in output_lines]), unsafe_allow_html=True)
-                    else:
-                        st.info("No semantic directions/reasons were determined or available in the processed bboxes.")
-                else:
-                    st.info("Processed component bounding boxes ('bboxes') not available in session state.")
+                            # Display in columns: image on left, text on right
+                            img_col, text_col = st.columns([1, 2]) 
+                            with img_col:
+                                st.image(llama_input_image, width=100, caption=f"Input for UID: {component_uid}")
+                            
+                            with text_col:
+                                st.markdown(f"- {output_line}", unsafe_allow_html=True)
+                            
+                            st.markdown("---") # Separator for each component entry
+                            found_at_least_one_image_to_display = True
+                    
+                    if not found_at_least_one_image_to_display:
+                        st.info("LLaMA input images are available in the analyzer, but no components in the current results have matching UIDs with stored images or the required semantic direction information to display their specific LLaMA input image.")
+                        # For further debugging:
+                        # if hasattr(analyzer, 'last_llama_input_images'):
+                        #     st.write("Available LLaMA image UIDs in analyzer:", list(analyzer.last_llama_input_images.keys()))
+                        # uids_in_bboxes = [b.get('uid') for b in st.session_state.active_results.get('bboxes', []) if b.get('uid')]
+                        # st.write("UIDs in current bboxes with semantic_direction:", [b.get('uid') for b in st.session_state.active_results.get('bboxes', []) if b.get('uid') and b.get('semantic_direction')])
         
         else:
             st.info("Run analysis to see component detection")
@@ -976,6 +548,10 @@ if st.session_state.active_results['original_image'] is not None:
                 if st.session_state.active_results['enhanced_mask'] is not None:
                     st.image(st.session_state.active_results['enhanced_mask'], caption="`Enhanced Mask`", use_container_width=True)
             
+            
+            if st.session_state.active_results.get('connection_points_image') is not None:
+                st.image(st.session_state.active_results['connection_points_image'], caption="`Connection Points`", use_container_width=True)
+
             if st.session_state.active_results['node_visualization'] is not None:
                 st.image(st.session_state.active_results['node_visualization'], caption="`Final Node Connections`", use_container_width=True)
     
@@ -1002,70 +578,7 @@ if st.session_state.active_results['original_image'] is not None:
         
         # Process the button click
         if netlist_btn and not st.session_state.final_netlist_generated:
-            try:
-                final_start_time = time.time()
-                
-                # Get the stored data needed for final netlist generation
-                # valueless_netlist has component entries which include bboxes with persistent_uid
-                valueless_netlist = st.session_state.active_results['netlist']
-                enum_img = st.session_state.active_results['enum_img'] # This is the (potentially cropped) image with numbers
-                # bbox_ids are the bboxes from (potentially cropped) image, now with visual enumeration 'id' and 'persistent_uid'
-                bbox_ids_for_fix = st.session_state.active_results['bbox_ids'] 
-                
-                # Create deep copy for the final netlist
-                netlist = deepcopy(valueless_netlist)
-                
-                # Call Gemini for component labeling
-                try:
-                    logger.debug("Calling Gemini for component labeling using (potentially cropped) enumerated image...")
-                    # gemini_labels_openrouter receives the (potentially cropped) enum_img
-                    gemini_info = gemini_labels_openrouter(enum_img) 
-                    logger.debug(f"Received information for {len(gemini_info) if gemini_info else 0} components from Gemini")
-                    logger.info(f"GEMINI BARE OUTPUT (gemini_info): {gemini_info}")
-                    st.session_state.active_results['vlm_stage2_output'] = gemini_info # Store for debugging
-                    
-                    # fix_netlist will correlate gemini_info (using visual enum 'id') 
-                    # with netlist lines (via persistent_uid found in bbox_ids_for_fix)
-                    analyzer.fix_netlist(netlist, gemini_info, bbox_ids_for_fix)
-                except Exception as gemini_error:
-                    logger.error(f"Error calling Gemini API: {str(gemini_error)}")
-                    st.warning(f"Could not get component values from AI: {str(gemini_error)}. Using basic netlist.")
-                    # Still use the valueless netlist
-                    netlist = valueless_netlist
-                
-                # Debug: Log the state of netlist lines before stringifying
-                if logger.isEnabledFor(logging.DEBUG):
-                    for i, ln_debug in enumerate(netlist):
-                        logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
-                
-                # Filter out lines with None values before generating the final string
-                netlist = [line for line in netlist if line.get('value') is not None and str(line.get('value')).strip().lower() != 'none']
-
-                # Generate the final netlist text
-                netlist_text = '\n'.join([analyzer.stringify_line(line) for line in netlist])
-                
-                # Store the results
-                st.session_state.active_results['netlist'] = netlist
-                st.session_state.active_results['netlist_text'] = netlist_text
-                st.session_state.editable_netlist_content = netlist_text
-                
-                # Calculate and store the final netlist generation time
-                final_elapsed_time = time.time() - final_start_time
-                if 'detailed_timings' in st.session_state.active_results:
-                    st.session_state.active_results['detailed_timings']['Final Netlist Generation'] = final_elapsed_time
-                
-                # Mark as completed
-                st.session_state.final_netlist_generated = True
-                
-                # Show success message
-                st.success("Final netlist generated successfully!")
-                
-                # Force a rerun to update the UI
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error generating final netlist: {str(e)}")
-                logger.error(f"Error generating final netlist: {str(e)}")
+            handle_final_netlist_generation(analyzer, st.session_state.active_results, logger)
         
         # Main netlist display: Initial (LLaMA) and Final side-by-side
         col1_main_netlist, col2_main_netlist = st.columns(2)
@@ -1217,389 +730,19 @@ if st.session_state.active_results['original_image'] is not None:
                 format="%.2f",
                 key="ac_freq_input"
             )
-            st.session_state.ac_frequency = ac_frequency_hz
+            st.session_state.ac_frequency = ac_frequency_hz # Update session state with the input value
 
 
         if st.button("Run SPICE Analysis"):
             try: # General try for the button action
                 if st.session_state.analysis_mode == "DC (.op)":
-                    try:
-                        if st.session_state.editable_netlist_content:
-                            logger.debug("Running DC SPICE analysis with netlist:")
-                            logger.debug(st.session_state.editable_netlist_content)
-                            
-                            net_text_dc = (
-                                '.title detected_circuit_dc\n'
-                                + st.session_state.editable_netlist_content
-                                + '\n.end\n'
-                            )
-                            
-                            # Show complete DC SPICE netlist
-                            with st.expander("🔍 Debug: Complete SPICE Netlist (DC)"):
-                                st.code(net_text_dc, language="python")
-                            
-                            logger.debug("Full DC SPICE netlist with control commands:")
-                            logger.debug(net_text_dc)
-                            
-                            parser = SpiceParser(source=net_text_dc)
-                            bootstrap_circuit = parser.build_circuit()
-                            
-                            logger.debug("Circuit elements (DC):")
-                            for element in bootstrap_circuit.elements:
-                                logger.debug(f"  {element}")
-                            
-                            simulator = bootstrap_circuit.simulator(
-                                temperature=27, nominal_temperature=27, gmin=1e-12,
-                                abstol=1e-12, reltol=1e-6, chgtol=1e-14,
-                                trtol=7, itl1=100, itl2=50, itl4=10
-                            )
-                            
-                            logger.debug("Running operating point analysis (DC)...")
-                            analysis = simulator.operating_point()
-                            
-                            logger.debug("Raw DC analysis results:")
-                            logger.debug("Nodes:")
-                            for node, value in analysis.nodes.items():
-                                logger.debug(f"  {node}: {value} (type: {type(value)})")
-                            logger.debug("Branches:")
-                            for branch, value in analysis.branches.items():
-                                logger.debug(f"  {branch}: {value} (type: {type(value)})")
-                            
-                            node_voltages_dc = {}
-                            for node, value in analysis.nodes.items():
-                                try:
-                                    voltage = float(value._value if hasattr(value, '_value_') else value.get_value() if hasattr(value, 'get_value') else value)
-                                    node_voltages_dc[str(node)] = f"{voltage:.3f}V"
-                                except Exception as e_val:
-                                    logger.error(f"Error converting DC node voltage {node}: {str(e_val)}")
-                                    node_voltages_dc[str(node)] = "Error"
-                            
-                            branch_currents_dc = {}
-                            for branch, value in analysis.branches.items():
-                                try:
-                                    current = float(value._value if hasattr(value, '_value_') else value.get_value() if hasattr(value, 'get_value') else value)
-                                    branch_currents_dc[str(branch)] = f"{current*1000:.3f}mA"
-                                except Exception as e_val:
-                                    logger.error(f"Error converting DC branch current {branch}: {str(e_val)}")
-                                    branch_currents_dc[str(branch)] = "Error"
-                            
-                            col1_dc, col2_dc = st.columns(2)
-                            with col1_dc:
-                                st.markdown("### Node Voltages (DC)")
-                                st.json(node_voltages_dc)
-                            with col2_dc:
-                                st.markdown("### Branch Currents (DC)")
-                                st.json(branch_currents_dc)
-                        else:
-                            st.error("Netlist is empty. Please generate or edit the netlist before running DC SPICE analysis.")
-                    
-                    except Exception as e_dc:
-                        error_msg_dc = f"❌ DC SPICE Analysis Error: {str(e_dc)}"
-                        logger.error(error_msg_dc, exc_info=True)
-                        st.error(error_msg_dc)
+                    perform_dc_spice_analysis(st.session_state.editable_netlist_content, logger)
 
                 elif st.session_state.analysis_mode == "AC (.ac)":
-                    try:
-                        if st.session_state.active_results.get('netlist'):
-                            sim_netlist_data = deepcopy(st.session_state.active_results['netlist'])
-                            spice_body_lines = []
-                            
-                            for line_dict in sim_netlist_data:
-                                if line_dict.get('class') == 'gnd': # Skip gnd for explicit lines
-                                    continue
-
-                                original_value = str(line_dict.get('value', ''))
-                                component_type_prefix = line_dict.get('component_type', '')
-
-                                # Modified condition: Attempt AC parsing if it's a V or I source,
-                                # as the VLM might provide AC-formatted values for components
-                                # not strictly classified as 'voltage.ac' or 'current.ac' by YOLO.
-                                if component_type_prefix in ['V', 'I']:
-                                    parsed_params = _parse_vlm_ac_string(original_value)
-                                    if parsed_params:
-                                        # Revert to including explicit DC offset, as ngspice seems to prefer it.
-                                        line_dict['value'] = f"{parsed_params['dc_offset']} AC {parsed_params['mag']} {parsed_params['phase']}"
-                                        logger.debug(f"Processed AC source {line_dict.get('component_type','')}{line_dict.get('component_num','')}: original='{original_value}', spice_val='{line_dict['value']}'")
-                                    else:
-                                        # If parsing fails for a V or I source, and it wasn't already in 'AC ...' format,
-                                        # it might be a DC value or an unparseable AC value. Log a warning but use original value
-                                        # if it doesn't look like a malformed AC attempt (e.g. just numbers for DC).
-                                        # If it explicitly started with "AC" or contained ":", but failed parsing, then warn and default.
-                                        if original_value.lower().strip().startswith('ac') or ':' in original_value:
-                                            default_ac_val = "0 AC 1 0" # Default: 0 DC offset, 1V/A mag, 0 phase
-                                            st.warning(f"Could not parse AC parameters for {component_type_prefix}{line_dict.get('component_num','')}: '{original_value}'. Using default: {default_ac_val}")
-                                            logger.warning(f"Could not parse AC parameters for {component_type_prefix}{line_dict.get('component_num','')}: '{original_value}'. Using default: {default_ac_val}")
-                                            line_dict['value'] = default_ac_val
-                                        # else: it's likely a DC value for a V/I source, leave it as is.
-                                elif component_type_prefix == 'C':
-                                    val_lower = original_value.lower()
-                                    component_name_debug = f"{component_type_prefix}{line_dict.get('component_num','')}"
-                                    # Expecting forms like "-jXc" e.g. "-j", "-j100"
-                                    if val_lower.startswith("-j"):
-                                        try:
-                                            reactance_str = val_lower[2:] # Remove "-j"
-                                            Xc = float(reactance_str) if reactance_str else 1.0 # If "-j", Xc=1
-                                            
-                                            sim_freq_hz = st.session_state.get('ac_frequency', 60.0) # Get current frequency
-
-                                            if Xc <= 0:
-                                                logger.warning(f"Capacitive reactance Xc={Xc} must be positive for {component_name_debug} from '{original_value}'. Using original value.")
-                                            elif sim_freq_hz <= 0:
-                                                logger.warning(f"Frequency {sim_freq_hz}Hz is invalid for calculating capacitance for {component_name_debug}. Using original value.")
-                                            else:
-                                                capacitance = 1 / (2 * np.pi * sim_freq_hz * Xc)
-                                                line_dict['value'] = capacitance # Store as float
-                                                logger.info(f"Processed Capacitor {component_name_debug}: original='{original_value}', Xc={Xc}, freq={sim_freq_hz}Hz, calculated C={capacitance:.4e}F")
-                                        except ValueError:
-                                            logger.warning(f"Could not parse Xc from '{original_value}' for {component_name_debug}. Using original value.")
-                                    # else: If not in "-j..." format, assume it's a direct capacitance or let PySpice/ngspice handle it.
-                                
-                                elif component_type_prefix == 'L':
-                                    val_lower = original_value.lower()
-                                    component_name_debug = f"{component_type_prefix}{line_dict.get('component_num','')}"
-                                    sim_freq_hz = st.session_state.get('ac_frequency', 60.0) # Get current frequency
-                                    
-                                    # Expecting forms like "jXl" (e.g. "j50") or "Xlj" (e.g. "50j", "2j")
-                                    Xl = None
-                                    parsed_Xl = False
-                                    if val_lower.startswith("j"): # e.g. j100, j2, j
-                                        try:
-                                            reactance_str = val_lower[1:] # Remove "j"
-                                            Xl = float(reactance_str) if reactance_str else 1.0 # If "j", Xl=1
-                                            parsed_Xl = True
-                                        except ValueError:
-                                            logger.warning(f"Could not parse Xl from '{original_value}' for {component_name_debug} (format jXl). Using original value.")
-                                    elif 'j' in val_lower and val_lower.endswith('j'): # e.g. 100j, 2j
-                                        try:
-                                            reactance_str = val_lower[:-1] # Remove trailing "j"
-                                            Xl = float(reactance_str) if reactance_str else 1.0 # Should not be empty if 'j' was found
-                                            parsed_Xl = True
-                                        except ValueError:
-                                            logger.warning(f"Could not parse Xl from '{original_value}' for {component_name_debug} (format Xlj). Using original value.")
-
-                                    if parsed_Xl and Xl is not None:
-                                        if Xl <= 0:
-                                            logger.warning(f"Inductive reactance Xl={Xl} must be positive for {component_name_debug} from '{original_value}'. Using original value.")
-                                        elif sim_freq_hz <= 0:
-                                            logger.warning(f"Frequency {sim_freq_hz}Hz is invalid for calculating inductance for {component_name_debug}. Using original value.")
-                                        else:
-                                            inductance = Xl / (2 * np.pi * sim_freq_hz)
-                                            line_dict['value'] = inductance # Store as float
-                                            logger.info(f"Processed Inductor {component_name_debug}: original='{original_value}', Xl={Xl}, freq={sim_freq_hz}Hz, calculated L={inductance:.4e}H")
-                                    # else: If parsing failed or not in j-notation, use original value or let PySpice/ngspice handle it.
-
-                                # Use analyzer.stringify_line to build the SPICE line from the (potentially modified) line_dict
-                                spice_line = analyzer.stringify_line(line_dict)
-                                if spice_line: # stringify_line returns "" for gnd, which we already skipped
-                                    spice_body_lines.append(spice_line)
-
-                            netlist_content_for_pyspice = "\n".join(spice_body_lines)
-                            
-                            if not netlist_content_for_pyspice.strip():
-                                 st.error("Netlist for AC analysis is effectively empty after processing. Cannot simulate.")
-                            else:
-                                net_text_ac = (
-                                    '.title detected_circuit_ac\n'
-                                    + netlist_content_for_pyspice
-                                    + f'\n* Equivalent SPICE command being executed:\n* .ac lin 1 {ac_frequency_hz} {ac_frequency_hz}\n'
-                                    + '\n.end\n'
-                                )
-                                
-                                # Show complete AC SPICE netlist
-                                with st.expander("🔍 Debug: Complete SPICE Netlist (AC)"):
-                                    st.code(net_text_ac, language="python")
-                                
-                                logger.debug("Running AC SPICE analysis with netlist:")
-                                logger.debug(net_text_ac)
-                                
-                                parser_ac = SpiceParser(source=net_text_ac)
-                                circuit_ac = parser_ac.build_circuit()
-
-                                logger.debug("Circuit elements (AC):")
-                                for element in circuit_ac.elements:
-                                    logger.debug(f"  {element}")
-
-                                simulator_ac = circuit_ac.simulator(
-                                    temperature=27, nominal_temperature=27, gmin=1e-12,
-                                    abstol=1e-12, reltol=1e-6, chgtol=1e-14,
-                                    trtol=7, itl1=100, itl2=50, itl4=10
-                                )
-                                
-                                sim_freq_hz = st.session_state.ac_frequency
-                                logger.debug(f"Running AC analysis at {sim_freq_hz} Hz...")
-                                
-                                # PySpice expects frequency with units for .ac()
-                                # Changed to pass raw float in Hz as per PySpice documentation for .ac() method parameters
-                                analysis_ac = simulator_ac.ac(
-                                    variation='lin',
-                                    start_frequency=u_Hz(sim_freq_hz),
-                                    stop_frequency=u_Hz(sim_freq_hz),
-                                    number_of_points=1
-                                )
-                                
-                                logger.debug("--- AC Analysis Result Inspection ---")
-                                logger.debug(f"Type of analysis_ac.nodes: {type(analysis_ac.nodes)}")
-
-                                # This is the primary dictionary for displaying node voltages.
-                                # It is populated by the corrected logic below.
-                                node_voltages_ac_display = {}
-                                for node_name_ac, val_waveform_ac in analysis_ac.nodes.items():
-                                    logger.debug(f"Processing Node: {node_name_ac}")
-                                    value_to_convert = None
-                                    is_value_complex_from_ndarray = False
-
-                                    if hasattr(val_waveform_ac, 'as_ndarray'):
-                                        try:
-                                            np_array_repr = val_waveform_ac.as_ndarray()
-                                            logger.info(f"  Node {node_name_ac}: Waveform.as_ndarray() = {np_array_repr} (dtype: {np_array_repr.dtype})")
-                                            if (np_array_repr.dtype == np.complex64 or np_array_repr.dtype == np.complex128) and len(np_array_repr) > 0:
-                                                value_to_convert = np_array_repr[0]
-                                                is_value_complex_from_ndarray = True
-                                                logger.info(f"    SUCCESS: Node {node_name_ac} using complex value from ndarray: {value_to_convert}")
-                                            else:
-                                                logger.warning(f"    Node {node_name_ac}: ndarray is not complex or is empty. Dtype: {np_array_repr.dtype}, Length: {len(np_array_repr)}")
-                                        except Exception as e_np:
-                                            logger.error(f"  Node {node_name_ac}: Error inspecting as_ndarray(): {e_np}")
-                                    else:
-                                        logger.warning(f"  Node {node_name_ac}: Waveform has no as_ndarray attribute.")
-
-                                    if not is_value_complex_from_ndarray:
-                                        if hasattr(val_waveform_ac, '__len__') and len(val_waveform_ac) > 0:
-                                            value_to_convert = val_waveform_ac[0] # Fallback to UnitValue
-                                            logger.info(f"  Node {node_name_ac}: Falling back to raw value from waveform[0] = '{value_to_convert}' (Type: {type(value_to_convert)})")
-                                            if isinstance(value_to_convert, UnitValue):
-                                                logger.debug(f"    UnitValue Details: str={str(value_to_convert)}, .value={getattr(value_to_convert, 'value', 'N/A')}")
-                                        else:
-                                            logger.warning(f"  Node {node_name_ac}: Waveform is empty or not indexable for fallback.")
-                                            node_voltages_ac_display[str(node_name_ac)] = "Error (no data)"
-                                            continue
-                                    
-                                    complex_voltage = safe_to_complex(value_to_convert)
-                                    logger.debug(f"  Node {node_name_ac}: Output of safe_to_complex = {complex_voltage} (Type: {type(complex_voltage)})")
-                                    
-                                    mag = np.abs(complex_voltage)
-                                    phase = np.angle(complex_voltage, deg=True)
-                                    node_voltages_ac_display[str(node_name_ac)] = f"{mag:.3f} ∠ {phase:.2f}° V"
-                                    logger.info(f"  Node {node_name_ac}: Final Display = {node_voltages_ac_display[str(node_name_ac)]}")
- 
-                                # The old debug block for raw nodes/branches and the overwriting node_voltages_ac_display loop
-                                # have been removed. node_voltages_ac_display is now correctly populated by the preceding loop.
-                                # branch_currents_ac_display will be correctly populated by its loop below.
-
-                                branch_currents_ac_display = {}
-                                for branch_name, val_waveform in analysis_ac.branches.items():
-                                    logger.debug(f"Processing Branch: {branch_name}")
-                                    value_to_convert_branch = None
-                                    is_value_complex_from_ndarray_branch = False
-
-                                    if hasattr(val_waveform, 'as_ndarray'):
-                                        try:
-                                            np_array_repr_branch = val_waveform.as_ndarray()
-                                            logger.info(f"  Branch {branch_name}: Waveform.as_ndarray() = {np_array_repr_branch} (dtype: {np_array_repr_branch.dtype})")
-                                            if (np_array_repr_branch.dtype == np.complex64 or np_array_repr_branch.dtype == np.complex128) and len(np_array_repr_branch) > 0:
-                                                value_to_convert_branch = np_array_repr_branch[0]
-                                                is_value_complex_from_ndarray_branch = True
-                                                logger.info(f"    SUCCESS: Branch {branch_name} using complex value from ndarray: {value_to_convert_branch}")
-                                            else:
-                                                logger.warning(f"    Branch {branch_name}: ndarray is not complex or is empty. Dtype: {np_array_repr_branch.dtype}, Length: {len(np_array_repr_branch)}")
-                                        except Exception as e_np_branch:
-                                            logger.error(f"  Branch {branch_name}: Error inspecting as_ndarray(): {e_np_branch}")
-                                    else:
-                                        logger.warning(f"  Branch {branch_name}: Waveform has no as_ndarray attribute.")
-
-                                    if not is_value_complex_from_ndarray_branch:
-                                        if hasattr(val_waveform, '__len__') and len(val_waveform) > 0:
-                                            value_to_convert_branch = val_waveform[0] # Fallback to UnitValue
-                                            logger.info(f"  Branch {branch_name}: Falling back to raw value from waveform[0] = '{value_to_convert_branch}' (Type: {type(value_to_convert_branch)})")
-                                            if isinstance(value_to_convert_branch, UnitValue):
-                                                logger.debug(f"    UnitValue Details: str={str(value_to_convert_branch)}, .value={getattr(value_to_convert_branch, 'value', 'N/A')}")
-                                        else:
-                                            logger.warning(f"  Branch {branch_name}: Waveform is empty or not indexable for fallback.")
-                                            branch_currents_ac_display[str(branch_name)] = "Error (no data)"
-                                            continue
-                                    
-                                    complex_current = safe_to_complex(value_to_convert_branch)
-                                    logger.debug(f"  Branch {branch_name}: Output of safe_to_complex = {complex_current} (Type: {type(complex_current)})")
-                                    
-                                    mag = np.abs(complex_current)
-                                    phase = np.angle(complex_current, deg=True)
-                                    branch_currents_ac_display[str(branch_name)] = f"{mag:.3f} ∠ {phase:.2f}° A"
-                                    logger.info(f"  Branch {branch_name}: Final Display = {branch_currents_ac_display[str(branch_name)]}")
-                                    
-                                logger.debug("--- End AC Analysis Result Inspection ---")
-
-
-                                col1_ac, col2_ac = st.columns(2)
-                                with col1_ac:
-                                    st.markdown("### Node Voltages (AC)")
-                                    st.json(node_voltages_ac_display) # This will now use the correctly populated dict
-                                with col2_ac:
-                                    st.markdown("### Branch Currents (AC)")
-                                    st.json(branch_currents_ac_display) # This will now use the correctly populated dict
-
-                                # After the AC analysis results display, add plots
-                                st.markdown("### AC Analysis Plots")
-                                
-                                # Create tabs for different plot types
-                                plot_tabs = st.tabs(["Phasor Diagram"])
-                                
-                                with plot_tabs[0]:
-                                    # Phasor diagram for voltages and currents
-                                    try:
-                                        # Create figure with two subplots side by side
-                                        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), subplot_kw={'projection': 'polar'})
-                                        
-                                        # Plot voltage phasors
-                                        max_v_mag = 0
-                                        for node, val_waveform in analysis_ac.nodes.items():
-                                            if len(val_waveform) > 0 and str(node) != '0':  # Skip ground node
-                                                complex_val = safe_to_complex(val_waveform[0])
-                                                mag = np.abs(complex_val)
-                                                angle = np.angle(complex_val)
-                                                max_v_mag = max(max_v_mag, mag)
-                                                # Plot phasor
-                                                ax1.plot([0, angle], [0, mag], label=f'V({node})', 
-                                                        marker='o', linewidth=2)
-                                        
-                                        # Adjust voltage plot
-                                        ax1.set_title('Voltage Phasors')
-                                        ax1.set_rmax(max_v_mag * 1.2)  # Add 20% margin
-                                        ax1.grid(True)
-                                        ax1.legend()
-                                        
-                                        # Plot current phasors
-                                        max_i_mag = 0
-                                        for branch, val_waveform in analysis_ac.branches.items():
-                                            if len(val_waveform) > 0:
-                                                complex_val = safe_to_complex(val_waveform[0])
-                                                mag = np.abs(complex_val)
-                                                angle = np.angle(complex_val)
-                                                max_i_mag = max(max_i_mag, mag)
-                                                # Plot phasor
-                                                ax2.plot([0, angle], [0, mag], label=str(branch), 
-                                                        marker='o', linewidth=2)
-                                        
-                                        # Adjust current plot
-                                        ax2.set_title('Current Phasors')
-                                        ax2.set_rmax(max_i_mag * 1.2)  # Add 20% margin
-                                        ax2.grid(True)
-                                        ax2.legend()
-                                        
-                                        plt.tight_layout()
-                                        st.pyplot(fig)
-                                        plt.close()
-                                        
-                                    except Exception as e_plot:
-                                        st.error(f"Error generating phasor plots: {str(e_plot)}")
-
-                    except Exception as e_ac:
-                        error_msg_ac = f"❌ AC SPICE Analysis Error: {str(e_ac)}"
-                        logger.error(error_msg_ac, exc_info=True)
-                        st.error(error_msg_ac)
-                        st.info("💡 Tip: Check AC source parameters, frequency, and circuit connectivity.")
+                    # Pass the potentially updated ac_frequency_hz from the number_input
+                    perform_ac_spice_analysis(st.session_state.active_results, analyzer, st.session_state.ac_frequency, logger)
             
-            # This except block is for the general try block associated with the st.button action
-            except Exception as e: 
+            except Exception as e: # This except block is for the general try block associated with the st.button action
                 error_msg = f"❌ SPICE Analysis Main Error: {str(e)}"
                 logger.error(error_msg, exc_info=True)
                 st.error(error_msg)

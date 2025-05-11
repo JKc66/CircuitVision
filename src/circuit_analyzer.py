@@ -46,6 +46,8 @@ class CircuitAnalyzer():
                  debug=False):
         self.yolo = YOLO(yolo_path)
         self.debug = debug
+        if self.debug:
+            self.last_llama_input_images = {}
         self.classes = load_classes()
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
@@ -129,6 +131,10 @@ class CircuitAnalyzer():
                 self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
                 if self.debug:
                     print("Groq client initialized successfully.")
+                    # It makes sense to initialize last_llama_input_images here as well, 
+                    # or ensure it's initialized if debug is true, as it's related to LLaMA/Groq debugging.
+                    if not hasattr(self, 'last_llama_input_images'): # Ensure it's initialized if not already
+                        self.last_llama_input_images = {}
             except Exception as e:
                 print(f"Failed to initialize Groq client: {e}")
         elif self.debug:
@@ -400,21 +406,39 @@ class CircuitAnalyzer():
 
         contours = [{'id': i, 'contour': contour, 'area': cv2.contourArea(contour)/normalizer, 'rectangle': cv2.boundingRect(contour)} for i, contour in enumerate(contours)]
 
+        # Define a palette of bright colors
+        bright_colors_palette = [
+            (255, 0, 0),    # Red
+            (0, 255, 0),    # Lime
+            (0, 0, 255),    # Blue
+            (255, 255, 0),  # Yellow
+            (0, 255, 255),  # Cyan
+            (255, 0, 255),  # Magenta
+            (255, 128, 0),  # Orange
+            (128, 0, 255),  # Violet
+            (0, 255, 128),  # Spring Green
+            (255, 192, 203), # Pink
+            (173, 216, 230), # Light Blue
+            (255, 165, 0),  # Orange (another shade)
+            (127, 255, 212), # Aquamarine
+            (240, 230, 140), # Khaki (light enough)
+            (255, 105, 180)  # Hot Pink
+        ]
+
         # Iterate through the contours and visualize each
-        for contour in contours:
-            # Choose a random color for each contour
-            color = (np.random.randint(0, 255), 
-                     np.random.randint(0, 255), 
-                     np.random.randint(0, 255))
-            cv2.drawContours(contour_img, [contour['contour']], -1, color, 2)
+        for contour_item in contours: # Renamed loop variable for clarity
+            # Choose a color from the palette
+            color = bright_colors_palette[contour_item['id'] % len(bright_colors_palette)]
+            cv2.drawContours(contour_img, [contour_item['contour']], -1, color, 2)
 
             font=cv2.FONT_HERSHEY_SIMPLEX
             font_scale=0.5
-            color=(255, 0, 0) 
+            # Text color for contour ID is Red
+            text_color=(255, 0, 0) 
             thickness=2
 
             # Calculate the contour's centroid
-            M = cv2.moments(contour['contour'])
+            M = cv2.moments(contour_item['contour'])
             if M["m00"] != 0:
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
@@ -422,11 +446,11 @@ class CircuitAnalyzer():
                 cX, cY = 0, 0 
 
             # Get the text for the current contour
-            text = str(contour['id'])
+            text = str(contour_item['id'])
 
             # Put the text on the image
             cv2.putText(contour_img, text, (cX + 10, cY + 10), 
-                        font, font_scale, color, thickness)
+                        font, font_scale, text_color, thickness)
         return contours, contour_img
 
     def resize_bboxes(self, bboxes, width_scale, height_scale):
@@ -931,6 +955,7 @@ class CircuitAnalyzer():
         nodes = {item['id']:{'id': item['id'], 'components': [], 'contour': item['contour']} for item in contours}
         
         rects_image_viz = contour_image_viz.copy()
+        connection_points_on_contours = [] # <<< Initialize list to store connection points
 
         # Loop through the bboxes that were resized along with the processing_mask_resized
         for i, bbox_comp_proc_resized in enumerate(processing_bboxes_resized):
@@ -984,6 +1009,7 @@ class CircuitAnalyzer():
                         
                         if not is_already_added:
                             nodes[contour_item['id']]['components'].append(target_bbox_to_add)
+                            connection_points_on_contours.append(point) # <<< Store the connection point
                             if self.debug:
                                 print(f"Node Conn: Added comp UID {target_bbox_to_add.get('persistent_uid')} to node {contour_item['id']}")
                         break # Found connection for this contour and component
@@ -1000,7 +1026,9 @@ class CircuitAnalyzer():
             # final_node_viz_image should be based on processing_mask_resized dimensions
             viz_fallback = processing_mask_resized.copy()
             if len(viz_fallback.shape) == 2: viz_fallback = cv2.cvtColor(viz_fallback, cv2.COLOR_GRAY2BGR)
-            return [], emptied_mask, enhanced, contour_image_viz, viz_fallback
+            # Create an empty connection points visualization if no valid nodes
+            connection_points_visualization = contour_image_viz.copy() # Start with contour viz
+            return [], emptied_mask, enhanced, contour_image_viz, viz_fallback, connection_points_visualization
 
         max_connections_node_val = max(len(node_data['components']) for node_data in valid_nodes.values())
         
@@ -1136,7 +1164,12 @@ class CircuitAnalyzer():
                             (cx-10, cy+10), cv2.FONT_HERSHEY_SIMPLEX, 
                             0.9, (0, 0, 255), 2) 
 
-        return new_nodes_list, emptied_mask, enhanced, contour_image_viz, final_node_viz_image
+        # Create visualization for connection points
+        connection_points_visualization = contour_image_viz.copy() # Start with the contour viz image
+        for p_conn in connection_points_on_contours:
+            cv2.circle(connection_points_visualization, p_conn, radius=5, color=(0, 255, 255), thickness=-1) # Cyan circles
+
+        return new_nodes_list, emptied_mask, enhanced, contour_image_viz, final_node_viz_image, connection_points_visualization
 
     def generate_netlist_from_nodes(self, node_list):
         netlist = []
@@ -1543,14 +1576,14 @@ class CircuitAnalyzer():
         model_to_use = "meta-llama/llama-4-scout-17b-16e-instruct" 
 
         if component_class_name in self.voltage_classes_names:
-            prompt = """Analyze this electrical circuit component image which shows a voltage source.
+            prompt = """Analyze this image.
 
 Focus on identifying the following key elements:
-1. The + (plus) and - (minus) symbols or voltage arrow if present
+1. The + (plus) and - (minus) symbols or arrow if present
 2. Their relative positions in the image (top, bottom, left, right)
 
 Return a JSON object with these fields:
-- symbol_positions: Describe the exact locations of + and - symbols. If there's a voltage arrow instead, write "ARROW"
+- symbol_positions: Describe the exact locations of + and - symbols. If there's an arrow instead, write "ARROW"
 - direction: ONE of [UP, DOWN, LEFT, RIGHT] determined by these rules:
   * For +/- symbols:
     - If + is at bottom → direction: "UP"
@@ -1569,7 +1602,7 @@ Example responses:
 {"symbol_positions": "ARROW", "direction": "RIGHT", "reason": "ARROW"}
 """
         elif component_class_name in self.diode_classes_names:
-            prompt = """Analyze this electrical circuit component image which shows a diode.
+            prompt = """Analyze this image.
 
 A diode symbol consists of:
 1. A triangle (▶) pointing in the direction of current flow
@@ -1614,9 +1647,9 @@ Example responses:
                         ]
                     }
                 ],
-                temperature=0, 
+                temperature=0.1, 
                 max_tokens=1024, 
-                top_p=1,         
+                top_p=0.95,         
                 stream=False,
                 response_format={"type": "json_object"} 
             )
@@ -1684,16 +1717,20 @@ Example responses:
                component_string_class_name in self.classes_of_interest_names:
                 
                 # Crop the component from the original image
-                xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
-                xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+                orig_xmin, orig_ymin = int(bbox['xmin']), int(bbox['ymin'])
+                orig_xmax, orig_ymax = int(bbox['xmax']), int(bbox['ymax'])
                 
-                # Ensure crop coordinates are valid
+                # Define padding for the LLaMA crop
+                llama_crop_padding = 10  # Pixels
                 h, w = image_rgb.shape[:2]
-                crop_xmin = max(0, xmin)
-                crop_ymin = max(0, ymin)
-                crop_xmax = min(w, xmax)
-                crop_ymax = min(h, ymax)
 
+                # Apply padding and ensure coordinates are within image bounds
+                crop_xmin = max(0, orig_xmin - llama_crop_padding)
+                crop_ymin = max(0, orig_ymin - llama_crop_padding)
+                crop_xmax = min(w, orig_xmax + llama_crop_padding)
+                crop_ymax = min(h, orig_ymax + llama_crop_padding)
+
+                # Ensure crop coordinates are valid after padding
                 if crop_xmin >= crop_xmax or crop_ymin >= crop_ymax:
                     if self.debug:
                         print(f"Skipping LLaMA for {component_string_class_name} due to invalid crop dimensions: {bbox}")
@@ -1703,6 +1740,10 @@ Example responses:
 
                 component_crop_rgb = image_rgb[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
                 
+                if self.debug and bbox.get('persistent_uid'):
+                    # Store a copy of the image that will be/was sent to LLaMA
+                    self.last_llama_input_images[bbox['persistent_uid']] = component_crop_rgb.copy()
+
                 if component_crop_rgb.size == 0:
                     if self.debug:
                         print(f"Skipping LLaMA for {component_string_class_name} due to empty crop: {bbox.get('persistent_uid')}")

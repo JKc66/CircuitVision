@@ -1,22 +1,14 @@
 # System Imports
 import os
 from dotenv import load_dotenv
-import sys, shutil
-from os.path import join, realpath
 import json
-import xml.etree.ElementTree as ET
-from xml import etree
-from random import choice
-import random
-from copy import deepcopy
 import cv2
 from google import genai
 from google.genai import types
-from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-from scipy.ndimage import zoom
+from PIL.ExifTags import TAGS
 import ast
 import re
 from typing import Union, Dict, List
@@ -24,7 +16,6 @@ import streamlit as st
 import openai
 import base64
 import io
-
 
 # Load environment variables from .env file
 load_dotenv()
@@ -552,3 +543,148 @@ def parse_component_value(value: str) -> Union[float, complex]:
         return parsed_value
     except ValueError:
         raise ValueError(f"Could not parse value: {value}")
+    
+
+# Function to load custom CSS
+def load_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+# Function to format EXIF data for better display
+def format_value(value):
+    """Format values for display, handling binary data appropriately"""
+    if isinstance(value, bytes):
+        return f"[Binary data, {len(value)} bytes]"
+    elif isinstance(value, str):
+        cleaned = ''.join(c for c in value if c.isprintable())
+        return cleaned if cleaned else "[Empty string]"
+    return value
+
+def format_exif_data(image_path):
+    """
+    Extracts and formats key EXIF data from an image for display.
+    Returns a dictionary of important EXIF tags or None if no data is found.
+    """
+    try:
+        img = Image.open(image_path)
+        
+        # Define important tags we want to show
+        important_tags = {
+            'Software',
+            'Orientation'
+        }
+        
+        exif_data = {}
+        try:
+            exif = img._getexif()
+            if exif:
+                for tag_id, value in exif.items():
+                    tag = TAGS.get(tag_id, tag_id)
+                    if tag in important_tags:
+                        exif_data[tag] = format_value(value)
+        except Exception as e:
+            logger.warning(f"Error getting EXIF with _getexif(): {e}")
+            
+        return exif_data if exif_data else None
+        
+    except Exception as e:
+        logger.error(f"Error formatting EXIF data: {str(e)}")
+        return None
+
+def safe_to_complex(value):
+    """
+    Safely convert PySpice values to complex numbers for AC analysis.
+    
+    Args:
+        value: A value that could be a PySpice.Unit.Unit.UnitValue, int, float, or complex
+        
+    Returns:
+        complex: A Python complex number
+    """
+    try:
+        # If it's already a complex number
+        if isinstance(value, complex):
+            print(f"DEBUG safe_to_complex: Input is already complex: {value}")
+            return value
+            
+        # If it's a PySpice UnitValue, extract the numerical value
+        if hasattr(value, 'value'):
+            print(f"DEBUG safe_to_complex: Input is UnitValue. value.value is: {value.value}, type: {type(value.value)}")
+            return complex(value.value)
+            
+        # If it's a simple number type
+        if isinstance(value, (int, float)):
+            print(f"DEBUG safe_to_complex: Input is int/float: {value}")
+            return complex(value)
+            
+        # Try generic conversion as last resort
+        print(f"DEBUG safe_to_complex: Trying generic complex() conversion for: {value}, type: {type(value)}")
+        return complex(value)
+        
+    except (ValueError, TypeError, AttributeError) as e:
+        print(f"Warning: Could not convert {type(value)} to complex: {value}, Error: {e}")
+        # Return a default value to prevent further errors
+        return complex(0)
+
+
+
+
+# Helper function to parse AC value strings from VLM
+def _parse_vlm_ac_string(raw_value_str):
+    if not isinstance(raw_value_str, str):
+        return None
+
+    # Pattern to capture: AC <mag_val> <mag_unit> <freq_val> <freq_unit> <phase_val> <phase_unit>
+    # Example: "AC 5V 1kHz 0deg" -> mag=5, phase=0
+    # Example: "AC 10.5mA 50.2Hz -45.5deg" -> mag=10.5, phase=-45.5
+    pattern_long = re.compile(
+        r"AC\s*"                                      # "AC "
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"     # Magnitude value and optional unit
+        r"(?:[+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩHz°]*\s*" # Frequency value and optional unit (non-capturing)
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*",   # Phase value and optional unit
+        re.IGNORECASE
+    )
+    match_long = pattern_long.match(raw_value_str.strip())
+    if match_long:
+        try:
+            mag_str = match_long.group(1)
+            phase_str = match_long.group(2) # Phase is the second captured group
+            mag = float(mag_str)
+            phase = float(phase_str)
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Will try other patterns
+
+    # Fallback for "AC <mag_val><unit> <phase_val><unit>" if freq is missing
+    # Example: "AC 5V 0deg"
+    pattern_short = re.compile(
+        r"AC\s*"
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°]*\s*"  # Magnitude value and optional unit
+        r"([+-]?\d*\.?\d+)\s*[a-zA-ZμmkKVAMWΩ°deg]*", # Phase value and optional unit
+        re.IGNORECASE
+    )
+    match_short = pattern_short.match(raw_value_str.strip())
+    if match_short:
+        try:
+            mag_str = match_short.group(1)
+            phase_str = match_short.group(2)
+            mag = float(mag_str)
+            phase = float(phase_str)
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Will try other patterns
+    
+    # NEW: Try "<mag>:<phase>" format, e.g., "4:-45" or "1:45"
+    pattern_mag_phase = re.compile(
+        r"\s*([+-]?\d*\.?\d+)\s*:\s*([+-]?\d*\.?\d+)\s*"
+    )
+    match_mag_phase = pattern_mag_phase.fullmatch(raw_value_str.strip())
+    if match_mag_phase:
+        try:
+            mag = float(match_mag_phase.group(1))
+            phase = float(match_mag_phase.group(2))
+            return {'dc_offset': 0, 'mag': mag, 'phase': phase}
+        except (IndexError, ValueError):
+            pass # Should not happen if regex fullmatch succeeds
+
+    return None # If no patterns match
