@@ -1442,17 +1442,45 @@ class CircuitAnalyzer():
         if component_class_name in self.voltage_classes_names:
             prompt = """Analyze this voltage source image.
 Return a JSON object with these fields:
-- symbol_positions: describe where + and - symbols are located or if arrow return NONE
-- direction: UP/DOWN/LEFT/RIGHT based on + symbol location (if + bottom = UP,
-                                                              if + top = DOWN,
-                                                              if + left = RIGHT,
-                                                              if + right = LEFT)
-                                                              or based on the arrow direction
+- symbol_positions: Describe the exact locations of + and - symbols. If there's a voltage arrow instead, write "ARROW"
+- direction: ONE of [UP, DOWN, LEFT, RIGHT] determined by these rules:
+  * For +/- symbols:
+    - If + is at bottom → direction: "UP"
+    - If + is at top → direction: "DOWN"
+    - If + is at left → direction: "RIGHT"
+    - If + is at right → direction: "LEFT"
+  * For voltage arrow:
+    - Arrow pointing up → direction: "UP"
+    - Arrow pointing down → direction: "DOWN"
+    - Arrow pointing left → direction: "LEFT"
+    - Arrow pointing right → direction: "RIGHT"
+- reason: ONE of ["SIGN", "ARROW"] indicating if direction was based on +/- symbols or an arrow.
+
+Example responses:
+{"symbol_positions": "+ at bottom, - at top", "direction": "UP", "reason": "SIGN"}
+{"symbol_positions": "ARROW", "direction": "RIGHT", "reason": "ARROW"}
 """
         elif component_class_name in self.diode_classes_names:
-            prompt = """Analyze this diode image.
-Return a JSON object with these fields:
-- direction: UP/DOWN/LEFT/RIGHT based on the (traiangle follwed by a bar) (where its pointing towards)
+            prompt = """Analyze this electrical circuit component image which shows a diode.
+
+A diode symbol consists of:
+1. A triangle (▶) pointing in the direction of current flow
+2. A bar (|) perpendicular to the direction of flow
+
+Focus on identifying:
+1. The orientation of the triangle-bar symbol
+2. The direction the triangle is pointing (this is the direction of current flow)
+
+Return a JSON object with ONE field:
+- direction: ONE of [UP, DOWN, LEFT, RIGHT] based on where the triangle points:
+  * Triangle points up → direction: "UP"
+  * Triangle points down → direction: "DOWN"
+  * Triangle points left → direction: "LEFT"
+  * Triangle points right → direction: "RIGHT"
+
+Example responses:
+{"direction": "RIGHT"}  // For triangle pointing right →
+{"direction": "UP"}     // For triangle pointing up ↑
 """
         else:
             if self.debug:
