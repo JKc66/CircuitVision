@@ -751,36 +751,123 @@ class CircuitAnalyzer():
             padding (int): Padding around crop_defining_bbox.
 
         Returns:
-            Tuple[np.ndarray, List[Dict], Tuple[int, int, int, int] | None]:
+            Tuple[np.ndarray, List[Dict], Dict | None]:
                 - Cropped image (or original if no crop_defining_bbox or invalid crop).
                 - New list of adjusted bboxes (or original if no crop).
-                - Crop area details (crop_abs_xmin, crop_abs_ymin, new_width, new_height) relative to original, or None.
+                - crop_debug_info (Dict): A dictionary containing detailed information about the crop operation, 
+                                          or None if no crop_defining_bbox was provided.
         """
+        crop_debug_info = {
+            'crop_applied': False,
+            'reason_for_no_crop': None,
+            'original_image_dims': image_to_crop.shape[:2][::-1], # (width, height)
+            'defining_bbox': None,
+            'padding_value': padding,
+            'initial_calculated_window_before_text': None,
+            'text_bboxes_that_expanded_crop': [],
+            'final_crop_window_abs': None,
+            'cropped_image_dims': None
+        }
+
         if crop_defining_bbox is None:
             if self.debug:
                 print("Crop: No crop_defining_bbox provided. Returning originals.")
-            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], None
+            crop_debug_info['reason_for_no_crop'] = "no_defining_bbox"
+            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
 
         original_height, original_width = image_to_crop.shape[:2]
         def_xmin, def_ymin, def_xmax, def_ymax = crop_defining_bbox
+        crop_debug_info['defining_bbox'] = (def_xmin, def_ymin, def_xmax, def_ymax)
 
-        crop_abs_xmin = max(0, def_xmin - padding)
-        crop_abs_ymin = max(0, def_ymin - padding)
-        crop_abs_xmax = min(original_width, def_xmax + padding)
-        crop_abs_ymax = min(original_height, def_ymax + padding)
+        # Early exit if crop_defining_bbox is already large relative to the image
+        original_area = float(original_height * original_width)
+        crop_defining_bbox_width = float(max(0, def_xmax - def_xmin))
+        crop_defining_bbox_height = float(max(0, def_ymax - def_ymin))
+        crop_defining_bbox_area = crop_defining_bbox_width * crop_defining_bbox_height
+
+        if original_area > 0 and (crop_defining_bbox_area / original_area) > 0.75: # Threshold: 75%
+            if self.debug:
+                print(f"Crop: crop_defining_bbox area ({crop_defining_bbox_area:.0f}) is > 75% of original image area ({original_area:.0f}). Skipping crop.")
+            crop_debug_info['reason_for_no_crop'] = "focused_image_skip"
+            crop_debug_info['cropped_image_dims'] = crop_debug_info['original_image_dims'] # No change
+            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
+
+        # Initial crop window calculation based on crop_defining_bbox and padding
+        current_crop_xmin = float(max(0, def_xmin - padding))
+        current_crop_ymin = float(max(0, def_ymin - padding))
+        current_crop_xmax = float(min(original_width, def_xmax + padding))
+        current_crop_ymax = float(min(original_height, def_ymax + padding))
+        crop_debug_info['initial_calculated_window_before_text'] = (int(round(current_crop_xmin)), int(round(current_crop_ymin)), int(round(current_crop_xmax)), int(round(current_crop_ymax)))
+        
+        if self.debug:
+            print(f"Crop: Initial calc. crop window (SAM extent + padding): x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
+
+        # Expand crop window to include nearby 'text' boxes
+        text_inclusion_padding = 15
+
+        for bbox_original in bboxes_to_adjust:
+            if bbox_original.get('class') == 'text':
+                text_xmin, text_ymin, text_xmax, text_ymax = float(bbox_original['xmin']), float(bbox_original['ymin']), float(bbox_original['xmax']), float(bbox_original['ymax'])
+                interest_area_xmin = float(def_xmin - padding)
+                interest_area_ymin = float(def_ymin - padding)
+                interest_area_xmax = float(def_xmax + padding)
+                interest_area_ymax = float(def_ymax + padding)
+                
+                overlaps_interest_area = not (text_xmax < interest_area_xmin or \
+                                              text_xmin > interest_area_xmax or \
+                                              text_ymax < interest_area_ymin or \
+                                              text_ymin > interest_area_ymax)
+
+                if overlaps_interest_area:
+                    expanded_xmin = min(current_crop_xmin, max(0, text_xmin - text_inclusion_padding))
+                    expanded_ymin = min(current_crop_ymin, max(0, text_ymin - text_inclusion_padding))
+                    expanded_xmax = max(current_crop_xmax, min(original_width, text_xmax + text_inclusion_padding))
+                    expanded_ymax = max(current_crop_ymax, min(original_height, text_ymax + text_inclusion_padding))
+
+                    # Check if this text box actually caused an expansion
+                    did_expand = (expanded_xmin != current_crop_xmin or 
+                                  expanded_ymin != current_crop_ymin or 
+                                  expanded_xmax != current_crop_xmax or 
+                                  expanded_ymax != current_crop_ymax)
+
+                    current_crop_xmin, current_crop_ymin, current_crop_xmax, current_crop_ymax = expanded_xmin, expanded_ymin, expanded_xmax, expanded_ymax
+                    
+                    if did_expand:
+                        if self.debug:
+                            print(f"Crop: Text box UID {bbox_original.get('persistent_uid')} at ({text_xmin:.0f},{text_ymin:.0f})-({text_xmax:.0f},{text_ymax:.0f}) caused expansion.")
+                            print(f"Crop: Updated crop window for text: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
+                        crop_debug_info['text_bboxes_that_expanded_crop'].append({
+                            'uid': bbox_original.get('persistent_uid'),
+                            'class': bbox_original.get('class'),
+                            'coords_original': (bbox_original['xmin'], bbox_original['ymin'], bbox_original['xmax'], bbox_original['ymax']),
+                            'coords_text_box_abs': (text_xmin, text_ymin, text_xmax, text_ymax) # these are absolute to original image
+                        })
+
+        # Finalize crop coordinates as integers, ensuring they remain within image boundaries
+        crop_abs_xmin = max(0, int(round(current_crop_xmin)))
+        crop_abs_ymin = max(0, int(round(current_crop_ymin)))
+        crop_abs_xmax = min(original_width, int(round(current_crop_xmax)))
+        crop_abs_ymax = min(original_height, int(round(current_crop_ymax)))
+        crop_debug_info['final_crop_window_abs'] = (crop_abs_xmin, crop_abs_ymin, crop_abs_xmax, crop_abs_ymax)
 
         if self.debug:
-            print(f"Crop: Original dims: {original_width}x{original_height}")
-            print(f"Crop: Defining bbox for crop: {crop_defining_bbox}")
-            print(f"Crop: Calculated absolute crop area (xmin,ymin,xmax,ymax): {crop_abs_xmin}, {crop_abs_ymin}, {crop_abs_xmax}, {crop_abs_ymax}")
+            print(f"Crop: Original image dims: {original_width}x{original_height}")
+            print(f"Crop: Defining bbox for crop (SAM extent): {def_xmin, def_ymin, def_xmax, def_ymax}")
+            print(f"Crop: Final calculated absolute crop window (xmin,ymin,xmax,ymax): {crop_abs_xmin}, {crop_abs_ymin}, {crop_abs_xmax}, {crop_abs_ymax}")
 
         if crop_abs_xmin >= crop_abs_xmax or crop_abs_ymin >= crop_abs_ymax:
             if self.debug:
                 print("Crop: Invalid crop region. Returning originals.")
-            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], None
+            crop_debug_info['reason_for_no_crop'] = "invalid_region_after_expansion"
+            crop_debug_info['cropped_image_dims'] = crop_debug_info['original_image_dims'] # No change
+            # Crop was attempted but resulted in an invalid region, still return originals but with debug info
+            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
 
         cropped_image = image_to_crop[crop_abs_ymin:crop_abs_ymax, crop_abs_xmin:crop_abs_xmax]
         new_height, new_width = cropped_image.shape[:2]
+        crop_debug_info['cropped_image_dims'] = (new_width, new_height)
+        crop_debug_info['crop_applied'] = True
+
         if self.debug:
             print(f"Crop: Cropped image shape: {cropped_image.shape}")
 
@@ -805,7 +892,8 @@ class CircuitAnalyzer():
         if self.debug:
             print(f"Crop: Original bbox count: {len(bboxes_to_adjust)}, Adjusted bbox count: {len(adjusted_bboxes)}")
         
-        return cropped_image, adjusted_bboxes, (crop_abs_xmin, crop_abs_ymin, new_width, new_height)
+        # Ensure final return is the crop_debug_info dictionary
+        return cropped_image, adjusted_bboxes, crop_debug_info
 
     def get_node_connections(self, _image_for_context, processing_wire_mask, bboxes_relative_to_mask):
         if self.debug:

@@ -574,26 +574,43 @@ if st.session_state.get('start_analysis_triggered', False):
                 image_for_analysis = st.session_state.active_results['original_image'] # Default
                 bboxes_for_analysis = st.session_state.active_results.get('bboxes_orig_coords_nms', [])
                 cropped_sam_mask_for_nodes = full_binary_sam_mask # Default to full if no crop
-                crop_details_returned = None
+                # Initialize crop_debug_info in session state before it's potentially set
+                st.session_state.active_results['crop_debug_info'] = None
 
                 if sam_extent_bbox and full_binary_sam_mask is not None:
                     logger.debug("Attempting to crop image and SAM2 mask based on SAM2 extent...")
-                    cropped_visual_image, adjusted_yolo_bboxes, crop_details_returned = analyzer.crop_image_and_adjust_bboxes(
+                    cropped_visual_image, adjusted_yolo_bboxes, crop_debug_info = analyzer.crop_image_and_adjust_bboxes(
                         st.session_state.active_results['original_image'],
                         st.session_state.active_results['bboxes_orig_coords_nms'],
                         sam_extent_bbox,
-                        padding=80 # Added some padding
+                        padding=80 
                     )
-                    if crop_details_returned:
+                    st.session_state.active_results['crop_debug_info'] = crop_debug_info # Store the detailed dict
+
+                    if crop_debug_info and crop_debug_info.get('crop_applied'):
                         image_for_analysis = cropped_visual_image
                         bboxes_for_analysis = adjusted_yolo_bboxes
-                        # Crop the full_binary_sam_mask using crop_details_returned
-                        crop_x, crop_y, crop_w, crop_h = crop_details_returned
-                        cropped_sam_mask_for_nodes = full_binary_sam_mask[crop_y : crop_y + crop_h, crop_x : crop_x + crop_w]
-                        logger.info(f"Visual image and SAM2 mask cropped. Cropped SAM mask shape: {cropped_sam_mask_for_nodes.shape}")
-                        st.session_state.active_results['crop_details'] = crop_details_returned
+                        
+                        # Crop the full_binary_sam_mask using details from crop_debug_info
+                        final_crop_coords = crop_debug_info.get('final_crop_window_abs') # (xmin, ymin, xmax, ymax)
+                        if final_crop_coords:
+                            crop_x, crop_y, crop_x_max, crop_y_max = final_crop_coords
+                            # Ensure SAM mask is not None before attempting slice
+                            if full_binary_sam_mask is not None:
+                                cropped_sam_mask_for_nodes = full_binary_sam_mask[crop_y : crop_y_max, crop_x : crop_x_max]
+                                logger.info(f"Visual image and SAM2 mask cropped. Cropped SAM mask shape: {cropped_sam_mask_for_nodes.shape}")
+                            else:
+                                logger.warning("Full binary SAM mask is None, cannot crop it.")
+                        else:
+                            logger.warning("Final crop window coordinates not found in crop_debug_info. Cannot crop SAM mask.")
+                            # Fallback: use uncropped SAM mask if crop details are missing but crop was supposedly applied
+                            cropped_sam_mask_for_nodes = full_binary_sam_mask 
+                    elif crop_debug_info and not crop_debug_info.get('crop_applied'):
+                        logger.info(f"Cropping was not applied based on crop_debug_info. Reason: {crop_debug_info.get('reason_for_no_crop', 'Unknown')}. Using originals.")
+                        # image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes remain as defaults
                     else:
-                        logger.warning("Cropping based on SAM2 extent failed or was not possible. Using originals.")
+                        # Should not happen if crop_debug_info is always returned as a dict by the modified function
+                        logger.warning("crop_debug_info was None or malformed after crop_image_and_adjust_bboxes call. Using originals.")
                 else:
                     logger.info("Skipping crop: SAM2 extent bbox or full mask not available.")
                 
@@ -786,7 +803,7 @@ if st.session_state.active_results['original_image'] is not None:
         st.image(st.session_state.active_results['original_image'], use_container_width=True)
         
         # Show image details as a dropdown
-        with st.expander("Image Details"):
+        with st.expander("🖼️ Image Details"):
             # Basic image properties that are always available
             img = Image.open(current_image_path) # Use current_image_path
             h, w = st.session_state.active_results['original_image'].shape[:2]
@@ -826,7 +843,35 @@ if st.session_state.active_results['original_image'] is not None:
                 logger.error(f"Error displaying EXIF data: {str(e)}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-    
+        # End of "Image Details" expander
+
+    # New, separate expander for Cropping Debug Information
+    with st.expander("Cropping Debug Information"):
+        crop_info = st.session_state.active_results.get('crop_debug_info')
+        if crop_info:
+            if crop_info.get('crop_applied'):
+                st.success("Cropping was applied successfully.")
+            else:
+                st.warning(f"Cropping was NOT applied. Reason: {crop_info.get('reason_for_no_crop', 'Unknown')}")
+            
+            st.markdown(f"- **Original Image Dimensions (WxH)**: {crop_info.get('original_image_dims', 'N/A')}")
+            st.markdown(f"- **SAM2 Extent Bbox (Crop Defining Bbox)**: {crop_info.get('defining_bbox', 'N/A')}")
+            st.markdown(f"- **Padding Value Used**: {crop_info.get('padding_value', 'N/A')}")
+            st.markdown(f"- **Initial Calculated Window (After Padding, Before Text)**: {crop_info.get('initial_calculated_window_before_text', 'N/A')}")
+            
+            text_expanders = crop_info.get('text_bboxes_that_expanded_crop', [])
+            if text_expanders:
+                st.markdown("- **Text Bboxes that Expanded Crop**:")
+                for i, txt_bbox_info in enumerate(text_expanders):
+                    st.markdown(f"  - Text Box {i+1}: UID=`{txt_bbox_info.get('uid')}`, Coords=`{txt_bbox_info.get('coords_text_box_abs')}`")
+            else:
+                st.markdown("- **No text bboxes caused crop expansion**.")
+            
+            st.markdown(f"- **Final Absolute Crop Window (xmin, ymin, xmax, ymax)**: {crop_info.get('final_crop_window_abs', 'N/A')}")
+            st.markdown(f"- **Cropped Image Dimensions (WxH)**: {crop_info.get('cropped_image_dims', 'N/A')}")
+        else:
+            st.info("No cropping debug information available (crop may not have run or info not stored).")
+
     with col2:
         st.markdown("### Component Detection")
         # Display the annotated image (which is based on image_for_analysis - potentially cropped)
@@ -850,7 +895,7 @@ if st.session_state.active_results['original_image'] is not None:
                         st.table(stats_data)
             
             # Expander for LLaMA Stage 1 (Direction) Debug Output
-            with st.expander("Debug: LLaMA Directions"):
+            with st.expander("↗️ Debug: LLaMA Directions"):
                 if 'bboxes' in st.session_state.active_results and st.session_state.active_results['bboxes']:
                     directions_data = []
                     for comp_bbox in st.session_state.active_results['bboxes']:
@@ -887,7 +932,7 @@ if st.session_state.active_results['original_image'] is not None:
                 st.image(st.session_state.active_results['sam2_output'], use_container_width=True)
         
         # Show additional debug images in a dropdown
-        with st.expander("Additional Debug Images"):
+        with st.expander("🖼️ Debug Images"):
             debug_col1, debug_col2 = st.columns(2)
             
             with debug_col1:
@@ -1253,7 +1298,63 @@ if st.session_state.active_results['original_image'] is not None:
                                             logger.warning(f"Could not parse AC parameters for {component_type_prefix}{line_dict.get('component_num','')}: '{original_value}'. Using default: {default_ac_val}")
                                             line_dict['value'] = default_ac_val
                                         # else: it's likely a DC value for a V/I source, leave it as is.
+                                elif component_type_prefix == 'C':
+                                    val_lower = original_value.lower()
+                                    component_name_debug = f"{component_type_prefix}{line_dict.get('component_num','')}"
+                                    # Expecting forms like "-jXc" e.g. "-j", "-j100"
+                                    if val_lower.startswith("-j"):
+                                        try:
+                                            reactance_str = val_lower[2:] # Remove "-j"
+                                            Xc = float(reactance_str) if reactance_str else 1.0 # If "-j", Xc=1
+                                            
+                                            sim_freq_hz = st.session_state.get('ac_frequency', 60.0) # Get current frequency
+
+                                            if Xc <= 0:
+                                                logger.warning(f"Capacitive reactance Xc={Xc} must be positive for {component_name_debug} from '{original_value}'. Using original value.")
+                                            elif sim_freq_hz <= 0:
+                                                logger.warning(f"Frequency {sim_freq_hz}Hz is invalid for calculating capacitance for {component_name_debug}. Using original value.")
+                                            else:
+                                                capacitance = 1 / (2 * np.pi * sim_freq_hz * Xc)
+                                                line_dict['value'] = capacitance # Store as float
+                                                logger.info(f"Processed Capacitor {component_name_debug}: original='{original_value}', Xc={Xc}, freq={sim_freq_hz}Hz, calculated C={capacitance:.4e}F")
+                                        except ValueError:
+                                            logger.warning(f"Could not parse Xc from '{original_value}' for {component_name_debug}. Using original value.")
+                                    # else: If not in "-j..." format, assume it's a direct capacitance or let PySpice/ngspice handle it.
                                 
+                                elif component_type_prefix == 'L':
+                                    val_lower = original_value.lower()
+                                    component_name_debug = f"{component_type_prefix}{line_dict.get('component_num','')}"
+                                    sim_freq_hz = st.session_state.get('ac_frequency', 60.0) # Get current frequency
+                                    
+                                    # Expecting forms like "jXl" (e.g. "j50") or "Xlj" (e.g. "50j", "2j")
+                                    Xl = None
+                                    parsed_Xl = False
+                                    if val_lower.startswith("j"): # e.g. j100, j2, j
+                                        try:
+                                            reactance_str = val_lower[1:] # Remove "j"
+                                            Xl = float(reactance_str) if reactance_str else 1.0 # If "j", Xl=1
+                                            parsed_Xl = True
+                                        except ValueError:
+                                            logger.warning(f"Could not parse Xl from '{original_value}' for {component_name_debug} (format jXl). Using original value.")
+                                    elif 'j' in val_lower and val_lower.endswith('j'): # e.g. 100j, 2j
+                                        try:
+                                            reactance_str = val_lower[:-1] # Remove trailing "j"
+                                            Xl = float(reactance_str) if reactance_str else 1.0 # Should not be empty if 'j' was found
+                                            parsed_Xl = True
+                                        except ValueError:
+                                            logger.warning(f"Could not parse Xl from '{original_value}' for {component_name_debug} (format Xlj). Using original value.")
+
+                                    if parsed_Xl and Xl is not None:
+                                        if Xl <= 0:
+                                            logger.warning(f"Inductive reactance Xl={Xl} must be positive for {component_name_debug} from '{original_value}'. Using original value.")
+                                        elif sim_freq_hz <= 0:
+                                            logger.warning(f"Frequency {sim_freq_hz}Hz is invalid for calculating inductance for {component_name_debug}. Using original value.")
+                                        else:
+                                            inductance = Xl / (2 * np.pi * sim_freq_hz)
+                                            line_dict['value'] = inductance # Store as float
+                                            logger.info(f"Processed Inductor {component_name_debug}: original='{original_value}', Xl={Xl}, freq={sim_freq_hz}Hz, calculated L={inductance:.4e}H")
+                                    # else: If parsing failed or not in j-notation, use original value or let PySpice/ngspice handle it.
+
                                 # Use analyzer.stringify_line to build the SPICE line from the (potentially modified) line_dict
                                 spice_line = analyzer.stringify_line(line_dict)
                                 if spice_line: # stringify_line returns "" for gnd, which we already skipped
