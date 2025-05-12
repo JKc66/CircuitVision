@@ -11,15 +11,14 @@
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
     <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?style=for-the-badge&cacheBust=2" />
   </a>
-</p>
-<p align="center">
-  <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
+    <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision?style=for-the-badge" />
   </a>
   <a href="https://deepwiki.com/JKc66/CircuitVision" target="_blank">
     <img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" />
   </a>
 </p>
+
 
 <p align="center">
   <a href="https://github.com/mah-sam">
