@@ -1,8 +1,5 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
-<h1 align="center">CircuitVision</h1>
-<p align="center"><em>Visualize and analyze electronic circuits with ease.</em></p>
-
 <p align="center">
   <img width="40%" src="static/images/CircuitVision.png" />
 </p>
