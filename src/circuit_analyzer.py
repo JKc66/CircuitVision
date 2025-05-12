@@ -52,7 +52,6 @@ class CircuitAnalyzer():
         # Add property to store last SAM2 output
         self.last_sam2_output = None
         
-        problematic = set(['__background__', 'inductor.coupled', 'operational_amplifier.schmitt_trigger', 'mechanical', 'optical', 'block', 'magnetic', 'antenna', 'relay'])
         reducing = set(['operational_amplifier.schmitt_trigger', 'integrated_circuit.ne555', 'resistor.photo', 'diode.thyrector'])
         deleting = set(['optical', '__background__', 'inductor.coupled', 'mechanical', 'block','magnetic'])
         unknown = set(['relay','antenna','diac','triac', 'crystal','antenna', 'probe', 'probe.current', 'probe.voltage', 'optocoupler', 'socket', 'fuse', 'speaker', 'motor', 'lamp', 'microphone','transistor.photo','xor', 'and', 'or', 'not', 'nand', 'nor'])
@@ -484,7 +483,7 @@ class CircuitAnalyzer():
         font = cv2.FONT_HERSHEY_SIMPLEX
         color = (0, 0, 255)  # Red color for the text
         
-        if bboxes == None:
+        if bboxes is None: # E711: Comparison to `None` should be `cond is None`
             bboxes = self.bboxes(image)
             bboxes = non_max_suppression_by_area(bboxes, iou_threshold=0.6)
 
@@ -1110,7 +1109,8 @@ class CircuitAnalyzer():
             # Return structures matching expected output, but empty/default where appropriate
             # final_node_viz_image should be based on processing_mask_resized dimensions
             viz_fallback = processing_mask_resized.copy()
-            if len(viz_fallback.shape) == 2: viz_fallback = cv2.cvtColor(viz_fallback, cv2.COLOR_GRAY2BGR)
+            if len(viz_fallback.shape) == 2:
+                viz_fallback = cv2.cvtColor(viz_fallback, cv2.COLOR_GRAY2BGR)
             # Create an empty connection points visualization if no valid nodes
             connection_points_visualization = contour_image_viz.copy() # Start with contour viz
             return [], emptied_mask, enhanced, contour_image_viz, viz_fallback, connection_points_visualization
@@ -1221,7 +1221,8 @@ class CircuitAnalyzer():
                     next_node_id_val += 1
         # Fallback if ground node wasn't determined (should be rare if valid_nodes exist)
         elif valid_nodes: 
-            if self.debug: print("Node Conn: Ground node ID not properly determined. Arbitrary numbering for all valid nodes.")
+            if self.debug:
+                print("Node Conn: Ground node ID not properly determined. Arbitrary numbering for all valid nodes.")
             next_node_id_val = 0
             for old_node_id in sorted(valid_nodes.keys()): # Iterate through all valid nodes
                 node_data = valid_nodes[old_node_id]
@@ -1258,7 +1259,6 @@ class CircuitAnalyzer():
 
     def generate_netlist_from_nodes(self, node_list):
         netlist = []
-        id_count = 1
         component_counters = {component_type: 1 for component_type in set(self.netlist_map.values()) if component_type}
         processed_components = set()
         
@@ -1285,7 +1285,6 @@ class CircuitAnalyzer():
                 if self.debug:
                     print(f"Warning: Node {node_id} has no contour for centroid calculation.")
 
-        # Removed old first pass for source_positive_node
         
         # Process components
         for n_idx, n_data in enumerate(node_list):
@@ -1294,17 +1293,14 @@ class CircuitAnalyzer():
             
             for component in node_components:
                 component_class = component.get('class')
-                # Bbox for this component is already in the same space as node contours
-                component_bbox = {
-                    'xmin': component['xmin'], 'ymin': component['ymin'],
-                    'xmax': component['xmax'], 'ymax': component['ymax']
-                }
+                
                 component_semantic_direction = component.get('semantic_direction', 'UNKNOWN')
                 persistent_uid = component.get('persistent_uid')
                 semantic_reason = component.get('semantic_reason', 'UNKNOWN') # Get the reason
 
                 if not persistent_uid: # Should always have this
-                    if self.debug: print(f"Warning: Component {component_class} missing persistent_uid. Skipping.")
+                    if self.debug:
+                        print(f"Warning: Component {component_class} missing persistent_uid. Skipping.")
                     continue
 
                 # Check if component should be skipped
@@ -1470,8 +1466,10 @@ class CircuitAnalyzer():
                         if self.debug:
                             print(f"Debug fix_netlist (Pass 1): VLM item for visual_id {visual_id_for_this_component} has no class. Skipping VLM update for this component.")
                         # Ensure 'class' and 'component_type' are consistent if no VLM update
-                        if 'class' not in line_from_gen_netlist: line_from_gen_netlist['class'] = 'unknown'
-                        if 'component_type' not in line_from_gen_netlist: line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
+                        if 'class' not in line_from_gen_netlist:
+                            line_from_gen_netlist['class'] = 'unknown'
+                        if 'component_type' not in line_from_gen_netlist:
+                            line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
                         break 
 
                     prospective_component_type_from_vlm = self.netlist_map.get(vlm_class, 'UN')
@@ -1508,8 +1506,10 @@ class CircuitAnalyzer():
                 if self.debug:
                     print(f"Debug fix_netlist (Pass 1): No VLM match found for component UID {target_persistent_uid} (VisualID {visual_id_for_this_component}). Original class/type preserved.")
                 # Ensure 'class' and 'component_type' are consistent if no VLM update
-                if 'class' not in line_from_gen_netlist: line_from_gen_netlist['class'] = 'unknown'
-                if 'component_type' not in line_from_gen_netlist: line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
+                if 'class' not in line_from_gen_netlist:
+                    line_from_gen_netlist['class'] = 'unknown'
+                if 'component_type' not in line_from_gen_netlist:
+                    line_from_gen_netlist['component_type'] = self.netlist_map.get(line_from_gen_netlist['class'], 'UN')
 
 
         # Sort netlist by visual_id to ensure stable numbering if visual_id exists.
