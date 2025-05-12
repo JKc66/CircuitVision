@@ -1,5 +1,3 @@
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import StandardScaler
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -13,10 +11,8 @@ from .utils import (
 
 # +++ SAM 2 Imports +++
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from PIL import Image
-import warnings
+
 # Import SAM2 components from sam2_infer
 from .sam2_infer import (
     SAM2Transforms,
@@ -50,7 +46,7 @@ class CircuitAnalyzer():
             self.last_llama_input_images = {}
         self.classes = load_classes()
         self.classes_names = set(self.classes.keys())
-        self.non_components = set(['text', 'junction', 'crossover', 'terminal', 'vss', 'explanatory', 'circuit', 'vss'])
+        self.non_components = set(['text', 'junction', 'crossover', 'vss', 'explanatory', 'circuit'])
         self.source_components = set(['voltage.ac', 'voltage.dc', 'voltage.dependent', 'current.dc', 'current.dependent'])
         
         # Add property to store last SAM2 output
@@ -738,9 +734,35 @@ class CircuitAnalyzer():
         
         for bbox in bboxes:
             # If the class is not 'crossover', 'junction', or 'terminal', zero out the bbox region
-            if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
+            if self.debug:
+                print(f"EmptiedMask Log: Processing bbox class: {bbox['class']}, UID: {bbox.get('persistent_uid')}")
+            
+            #MODIFIED: Preserve terminal if it IS NOT a source component
+            # We want to remove the area of the AC source, even if YOLO calls it 'terminal'.
+            # The VLM will later confirm its true type. Regular terminals (small connection points)
+            # might still need their areas preserved if they are small and distinct from wires.
+            # However, given the current YOLO output, the AC source is large and called 'terminal'.
+            # For now, let's assume if YOLO calls something 'terminal' AND it's large enough to be a source,
+            # we should try to empty it. But the simplest first step is to empty ALL 'terminal' designated areas
+            # and see if that correctly isolates wires from the AC source body.
+            # A more nuanced approach might be needed if small, true terminals are wrongly erased.
+
+            # Original problematic line:
+            # if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
+            
+            # Temporarily, let's try removing 'terminal' from the skip list here too,
+            # to see if it makes the AC source get emptied.
+            # This is to test the hypothesis that 'terminal' in this list is the sole problem for the AC source.
+            components_to_preserve_in_mask = ('crossover', 'junction', 'circuit', 'vss') # 'terminal' removed for testing
+
+            if bbox['class'] not in components_to_preserve_in_mask:
+                if self.debug:
+                    print(f"EmptiedMask Log: Zeroing out {bbox['class']} (UID: {bbox.get('persistent_uid')})")
                 image_copy[int(bbox['ymin']):int(bbox['ymax']), 
                           int(bbox['xmin']):int(bbox['xmax'])] = 0
+            else:
+                if self.debug:
+                    print(f"EmptiedMask Log: PRESERVING {bbox['class']} (UID: {bbox.get('persistent_uid')}) in mask")
                 
             # If the class is 'circuit', keep only the pixels within the bounding box
             if bbox['class'] == 'circuit':
@@ -935,15 +957,58 @@ class CircuitAnalyzer():
         emptied_mask = processing_wire_mask.copy()
         current_height, current_width = emptied_mask.shape[:2]
 
+        if self.debug:
+            # Find the specific terminal bbox for detailed logging
+            problematic_terminal_uid = "terminal_333_266_410_334" # As seen in logs
+            problematic_bbox_for_log = None
+            for bbox_check in bboxes_relative_to_mask:
+                if bbox_check.get('persistent_uid') == problematic_terminal_uid:
+                    problematic_bbox_for_log = bbox_check
+                    break
+            
+            if problematic_bbox_for_log:
+                bb_ymin, bb_ymax = max(0, int(problematic_bbox_for_log['ymin'])), min(current_height, int(problematic_bbox_for_log['ymax']))
+                bb_xmin, bb_xmax = max(0, int(problematic_bbox_for_log['xmin'])), min(current_width, int(problematic_bbox_for_log['xmax']))
+                if bb_ymin < bb_ymax and bb_xmin < bb_xmax:
+                    terminal_area_in_processing_mask = processing_wire_mask[bb_ymin:bb_ymax, bb_xmin:bb_xmax]
+                    is_terminal_present_in_processing_mask = np.any(terminal_area_in_processing_mask)
+                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} area in INPUT processing_wire_mask. Is present: {is_terminal_present_in_processing_mask}. Sum: {np.sum(terminal_area_in_processing_mask)}")
+
         for bbox_comp in bboxes_relative_to_mask:
-            if bbox_comp['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'): # 'circuit' may not exist or be relevant here
+            # MODIFIED: Log decision for the problematic terminal
+            is_problematic_terminal_current_bbox = bbox_comp.get('persistent_uid') == problematic_terminal_uid
+
+            # Original condition:
+            # if bbox_comp['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
+            # For logging, let's explicitly state what happens to 'terminal'
+            
+            # MODIFIED: Removed 'terminal' from the list of components to preserve locally
+            components_to_preserve_locally = ('crossover', 'junction', 'circuit', 'vss') 
+            
+            if bbox_comp['class'] not in components_to_preserve_locally:
+                if self.debug and is_problematic_terminal_current_bbox:
+                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) is NOT in components_to_preserve_locally. Will be ZEROED OUT by this loop.")
+                
                 ymin, ymax = max(0, int(bbox_comp['ymin'])), min(current_height, int(bbox_comp['ymax']))
                 xmin, xmax = max(0, int(bbox_comp['xmin'])), min(current_width, int(bbox_comp['xmax']))
                 if ymin < ymax and xmin < xmax:
                     emptied_mask[ymin:ymax, xmin:xmax] = 0
+            else: # Component IS in components_to_preserve_locally
+                if self.debug and is_problematic_terminal_current_bbox:
+                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) IS IN components_to_preserve_locally. Will be PRESERVED by this loop.")
+                # No action, area is preserved
         
         if self.debug:
-            self.show_image(emptied_mask, 'Emptied Mask (from cropped SAM2, pre-resize)')
+            self.show_image(emptied_mask, 'Emptied Mask (from cropped SAM2, pre-resize, after NodeConn local empty)')
+            # Log state of problematic terminal in the locally emptied_mask
+            if problematic_bbox_for_log: # Check if found earlier
+                bb_ymin, bb_ymax = max(0, int(problematic_bbox_for_log['ymin'])), min(current_height, int(problematic_bbox_for_log['ymax']))
+                bb_xmin, bb_xmax = max(0, int(problematic_bbox_for_log['xmin'])), min(current_width, int(problematic_bbox_for_log['xmax']))
+                if bb_ymin < bb_ymax and bb_xmin < bb_xmax:
+                    terminal_area_in_local_emptied_mask = emptied_mask[bb_ymin:bb_ymax, bb_xmin:bb_xmax]
+                    is_terminal_present_in_local_emptied_mask = np.any(terminal_area_in_local_emptied_mask)
+                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} area in LOCAL emptied_mask (AFTER loop). Is present: {is_terminal_present_in_local_emptied_mask}. Sum: {np.sum(terminal_area_in_local_emptied_mask)}")
+
 
         # Resize this emptied_mask (derived from cropped SAM2) and its corresponding bboxes for contour processing
         # Note: bboxes_relative_to_mask are already relative to the full extent of emptied_mask before this resize.
@@ -992,8 +1057,19 @@ class CircuitAnalyzer():
                 for point_array in contour_item['contour']:
                     point = tuple(point_array[0]) # Point is in resized coordinate system
                     
+                    # Determine pixel threshold based on component type
+                    current_pixel_threshold = 6 # Default
+                    component_class_for_threshold = bbox_comp_proc_resized['class']
+                    # self.source_components is defined in __init__
+                    # Check if component_class_for_threshold is in the set of source components
+                    if component_class_for_threshold in self.source_components: 
+                        current_pixel_threshold = 20 # Larger threshold for sources (increased from 10 to 20)
+                    # Check if component_class_for_threshold is in a list of other sensitive components
+                    elif component_class_for_threshold in ['diode', 'diode.light_emitting', 'diode.zener', 'transistor.bjt', 'transistor.fet']:
+                        current_pixel_threshold = 8
+
                     # is_point_near_bbox expects bbox_comp_proc_resized (already in resized system)
-                    if self.is_point_near_bbox(point, bbox_comp_proc_resized, pixel_threshold=6):
+                    if self.is_point_near_bbox(point, bbox_comp_proc_resized, pixel_threshold=current_pixel_threshold):
                         # IMPORTANT: Store the component from processing_bboxes_resized to align coordinate systems
                         # for geometric reasoning with node contours. persistent_uid and semantic_direction
                         # should have been copied by resize_bboxes.
@@ -1002,7 +1078,8 @@ class CircuitAnalyzer():
                         component_unique_ref = target_bbox_to_add.get('persistent_uid')
                         # Fallback if persistent_uid is somehow missing (should not happen with current crop logic)
                         if component_unique_ref is None: 
-                             if self.debug: print(f"WARNING: persistent_uid missing for component: {target_bbox_to_add.get('class')}")
+                             if self.debug: 
+                                print(f"WARNING: persistent_uid missing for component: {target_bbox_to_add.get('class')}")
                              component_unique_ref = (target_bbox_to_add['class'], target_bbox_to_add['xmin'], target_bbox_to_add['ymin'], target_bbox_to_add['xmax'], target_bbox_to_add['ymax'])
 
                         is_already_added = False
@@ -1231,7 +1308,8 @@ class CircuitAnalyzer():
                     continue
 
                 # Check if component should be skipped
-                is_ignorable_class = component_class in ['text', 'explanatory', 'junction', 'crossover', 'terminal']
+                # MODIFIED: Removed 'terminal' from ignorable classes
+                is_ignorable_class = component_class in ['text', 'explanatory', 'junction', 'crossover']
                 is_already_processed = persistent_uid in processed_components
                 if is_ignorable_class or is_already_processed:
                     continue

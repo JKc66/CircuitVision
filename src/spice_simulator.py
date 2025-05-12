@@ -12,11 +12,45 @@ def perform_dc_spice_analysis(current_netlist_content, app_logger):
     try:
         if current_netlist_content:
             app_logger.debug("Running DC SPICE analysis with netlist:")
-            app_logger.debug(current_netlist_content)
+
+            # Pre-process netlist for DC analysis: comment out C and L with reactance values
+            processed_lines_for_dc = []
+            for line in current_netlist_content.split('\n'):
+                line_stripped = line.strip()
+                if not line_stripped:
+                    processed_lines_for_dc.append(line)
+                    continue
+
+                parts = line_stripped.split()
+                if not parts:
+                    processed_lines_for_dc.append(line)
+                    continue
+                
+                # Ensure parts[0] exists and is not empty before accessing parts[0][0]
+                component_char = ''
+                if parts[0]:
+                    component_char = parts[0][0].upper()
+                
+                is_problematic_for_dc = False
+                if component_char in ['C', 'L'] and len(parts) >= 4:
+                    value_part = parts[3]
+                    if value_part.startswith('j') or value_part.startswith('-j'):
+                        is_problematic_for_dc = True
+                
+                if is_problematic_for_dc:
+                    # Comment out the line for DC analysis
+                    processed_lines_for_dc.append(f"* {line} ; DC analysis: reactance value ignored")
+                    app_logger.info(f"DC Analysis: Ignoring line due to reactance value: {line_stripped}")
+                else:
+                    processed_lines_for_dc.append(line)
             
+            current_netlist_content_dc_safe = "\n".join(processed_lines_for_dc)
+            app_logger.debug("DC-safe netlist:")
+            app_logger.debug(current_netlist_content_dc_safe)
+
             net_text_dc = (
                 '.title detected_circuit_dc\n'
-                + current_netlist_content
+                + current_netlist_content_dc_safe
                 + '\n.end\n'
             )
             

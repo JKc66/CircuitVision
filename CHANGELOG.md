@@ -123,6 +123,14 @@ The generation of the final, usable netlist involves a sophisticated multi-stage
     *   **Final Null Value Filtering (Commit `12dce171`):** Implemented a post-processing step in `app.py` *after* `fix_netlist` to explicitly remove any remaining lines from the netlist where the component `value` was `None` or the string `"None"`, ensuring a cleaner final output.
     These refinements result in a more accurate and SPICE-compatible netlist. (Commits: `12dce171`, `681df4da`, `57d5db22`)
 
+*   **Refinement for AC Source Detection and Netlist Inclusion (Post May 8, 2025 - Interactive Debugging Session):**
+    *   **Problem:** AC voltage sources misclassified by YOLO as `'terminal'` were being incorrectly handled (e.g., treated as part of a wire/node during mask processing or ignored during initial netlist generation), leading to their omission from the final netlist and subsequent incorrect DC SPICE analysis.
+    *   **Multi-faceted Solution:**
+        *   **Initial Component Processing (`__init__` in `CircuitAnalyzer`):** `'terminal'` was removed from the `self.non_components` set. This allows components initially classified as `'terminal'` by YOLO to be passed to subsequent analysis stages (like VLM) instead of being filtered out upfront.
+        *   **Mask Generation for Node Analysis (`get_node_connections` in `CircuitAnalyzer`):** The list of components whose areas are preserved during the local mask emptying step within this function (`components_to_preserve_locally`) was modified to *exclude* `'terminal'`. This crucial change ensures that the body of a misclassified AC source is correctly zeroed out from the specific mask used for wire contour detection in this function, preventing it from being treated as part of a node. This complements earlier iterative refinements in the global `get_emptied_mask` function.
+        *   **Initial Netlist Construction (`generate_netlist_from_nodes` in `CircuitAnalyzer`):** `'terminal'` was removed from the `is_ignorable_class` list. This ensures that components identified by YOLO as `'terminal'` are included in the first-pass (valueless) netlist. The VLM (Gemini) in Stage 2 then has the opportunity to correct the component's class (e.g., to `voltage.ac`) and extract its value for the final netlist.
+    *   **Impact:** These coordinated changes ensure that an AC voltage source, even if misclassified by YOLO, is correctly handled throughout the pipeline: its visual area is appropriately excluded from wire masks, and it is included in the netlist generation process where its type and value can be accurately determined by the VLM. This directly addresses the problem of missing AC sources and incorrect DC analysis mode detection.
+
 ## III. User Interface (UI), Visualization, and Workflow Enhancements
 
 ### A. Streamlined, Event-Driven Workflow Automation
