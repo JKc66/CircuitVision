@@ -43,6 +43,7 @@
   - [🛠️ Setup](#️-setup)
     - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
   - [🚀 Usage](#-usage)
+  - [🧠 Training Code](#-training-code)
 
 ## 🚀 Overview
 
@@ -153,6 +154,18 @@ For a consistent and isolated environment, we recommend using Docker.
     *   Produce the final, enriched netlist.
 4.  **Review Results:** Explore the visualizations, component statistics, timing data, and the generated netlists directly in the UI.
 5.  **Simulate:** Copy the final netlist for use in your preferred SPICE simulation software.
+
+## 🧠 Training Code
+
+Explore the core training pipelines used to build the intelligence behind CircuitVision:
+
+* **🟪 SAM 2 Training**
+  Custom training notebook for **Segment Anything Model 2**, tailored specifically for electrical circuit segmentation.
+  📎 [View on Kaggle](https://www.kaggle.com/code/mah01sam/training-sam-2/notebook?scriptVersionId=237405492)
+
+* **🟧 YOLOv11 Training**
+  End-to-end training and inference pipeline for detecting circuit elements with **YOLOv11**.
+  📎 [View on Kaggle](https://www.kaggle.com/code/mah01sam/yolov11-training-and-project-pipeline)
 
 ---
 
