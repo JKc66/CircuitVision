@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 import streamlit as st
 from PIL import Image, ImageOps
-from src.utils import non_max_suppression_by_confidence, gemini_labels_openrouter
+from src.utils import non_max_suppression_by_confidence, gemini_labels_openrouter, non_max_suppression_by_area
 
 def process_new_upload(uploaded_file, upload_dir_path, app_logger):
     """Handles the processing of a newly uploaded image file."""
@@ -59,6 +59,7 @@ def process_new_upload(uploaded_file, upload_dir_path, app_logger):
     # Re-open from uploaded_file to get original bytes for PIL, as 'image' is already processed by cv2
     uploaded_file.seek(0) # Reset file pointer
     pil_image_for_exif = Image.open(uploaded_file)
+    st.session_state.active_results['original_image_pil'] = pil_image_for_exif # STORE THE PIL IMAGE
         
     # Auto-rotate the image based on EXIF orientation tag
     app_logger.info(f"Checking EXIF orientation for {uploaded_file.name}")
@@ -111,10 +112,28 @@ def run_initial_detection_and_enrichment(current_analyzer, active_results, detai
         raise ValueError("Original image not available for YOLO analysis.") 
     detailed_timings_dict['YOLO Component Detection'] = time.time() - step_start_time_yolo
 
+    # --- NEW STEP: Reclassify terminals based on preliminary connectivity ---
+    app_logger.info("Attempting preliminary reclassification of 'terminal' components...")
+    if 'original_image_pil' in active_results and active_results['original_image_pil'] is not None:
+        image_pil_for_reclass = active_results['original_image_pil']
+        image_rgb_for_reclass = np.array(image_pil_for_reclass.convert("RGB"))
+        current_analyzer.reclassify_terminals_based_on_connectivity(image_rgb_for_reclass, active_results['bboxes_orig_coords_nms']) # Modifies bboxes_orig_coords_nms in-place
+        app_logger.info("Preliminary reclassification of 'terminal' components completed.")
+        # active_results['bboxes_orig_coords_nms'] is now updated with reclassified classes
+    else:
+        app_logger.warning("Skipping terminal reclassification: 'original_image_pil' not found.")
+    # --- END MOVED BLOCK ---
+
+    # Store bboxes *after* reclassification but *before* LLaMA enrichment for debugging
+    # This helps see what class LLaMA will receive.
+    if active_results.get('bboxes_orig_coords_nms'):
+         active_results['bboxes_after_reclass_before_llama'] = deepcopy(active_results['bboxes_orig_coords_nms'])
+
     # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
+    # This step now operates on bboxes that have already been through terminal reclassification
     can_enrich = (
         active_results.get('bboxes_orig_coords_nms') and
-        active_results.get('original_image') is not None and
+        active_results.get('original_image') is not None and # original_image is numpy, used by _enrich_bboxes_with_directions
         hasattr(current_analyzer, 'groq_client') and current_analyzer.groq_client
     )
     if can_enrich:
@@ -134,7 +153,7 @@ def run_initial_detection_and_enrichment(current_analyzer, active_results, detai
     elif active_results.get('bboxes_orig_coords_nms') and active_results.get('original_image') is not None:
         app_logger.warning("Skipping LLaMA semantic direction enrichment: Groq client not available or other issue.")
     
-    return active_results.get('bboxes_orig_coords_nms') # Return the (potentially enriched) bboxes
+    return active_results.get('bboxes_orig_coords_nms') # Return the (potentially reclassified and LLaMA-enriched) bboxes
 
 def run_segmentation_and_cropping(current_analyzer, active_results, detailed_timings_dict, app_logger):
     """Performs SAM2 segmentation, determines extent, and crops the image and masks."""

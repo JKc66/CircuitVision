@@ -106,14 +106,23 @@ class CircuitAnalyzer():
         self.sam2_device = None
 
         # +++ Component types for semantic direction analysis +++
-        # These are string names. The numeric IDs will be used in the enrichment function.
         self.yolo_class_names_map = self.yolo.model.names # Get mapping from class ID to name from YOLO model
-        self.classes_of_interest_names = {
+        # Define classes of interest by string name for LLaMA processing
+        self.llama_classes_of_interest_names = {
             'voltage.dc', 'voltage.ac', 
             'diode', 'diode.light_emitting', 'diode.zener',
             'transistor.bjt', 
             'unknown' 
         }
+        # Convert string names to numeric IDs for efficient checking in _enrich_bboxes_with_directions
+        self.llama_numeric_classes_of_interest = set()
+        for num_id, name_str in self.yolo_class_names_map.items():
+            if name_str in self.llama_classes_of_interest_names:
+                self.llama_numeric_classes_of_interest.add(num_id)
+        
+        if self.debug:
+            print(f"LLaMA numeric classes of interest for direction: {self.llama_numeric_classes_of_interest}")
+
         self.voltage_classes_names = {'voltage.dc', 'voltage.ac', 'transistor.bjt', 'unknown'}
         self.diode_classes_names = {'diode', 'diode.light_emitting', 'diode.zener'}
         self.current_source_classes_names = {'current.dc', 'current.dependent'}
@@ -1292,114 +1301,111 @@ class CircuitAnalyzer():
             current_node_id = n_data['id']
             
             for component in node_components:
-                component_class = component.get('class')
-                
-                component_semantic_direction = component.get('semantic_direction', 'UNKNOWN')
+                component_class = component.get('class') # This is the class after potential reclassification
                 persistent_uid = component.get('persistent_uid')
-                semantic_reason = component.get('semantic_reason', 'UNKNOWN') # Get the reason
+                
+                # Semantic direction and reason would have been added by LLaMA if the component was eligible
+                component_semantic_direction = component.get('semantic_direction', 'UNKNOWN')
+                semantic_reason = component.get('semantic_reason', 'UNKNOWN')
 
-                if not persistent_uid: # Should always have this
+                if not persistent_uid:
                     if self.debug:
                         print(f"Warning: Component {component_class} missing persistent_uid. Skipping.")
                     continue
 
-                # Check if component should be skipped
-                # MODIFIED: Removed 'terminal' from ignorable classes
                 is_ignorable_class = component_class in ['text', 'explanatory', 'junction', 'crossover']
                 is_already_processed = persistent_uid in processed_components
                 if is_ignorable_class or is_already_processed:
                     continue
-                    
                 processed_components.add(persistent_uid)
-                # Determine component_type_prefix considering semantic_reason
-                yolo_class = component_class # Original class from YOLO
-                reason = component.get('semantic_reason', 'UNKNOWN')
-                prospective_prefix = self.netlist_map.get(yolo_class, 'UN') # Default prefix
 
-                if yolo_class in self.voltage_classes_names and reason == "ARROW":
-                    # If YOLO said voltage but LLaMA saw an arrow, treat as current source for prefix
-                    # Assuming independent current source for now, map to 'I'
-                    # Dependent sources might have other symbols (diamond) which LLaMA isn't specifically looking for yet
-                    prospective_prefix = 'I' 
-                    if self.debug:
-                        print(f"InitialNetlist: YOLO class '{yolo_class}' with reason ARROW. Using prefix 'I'. UID: {persistent_uid}")
-                elif yolo_class in self.current_source_classes_names and reason == "SIGN":
-                    # If YOLO said current but LLaMA saw a sign, treat as voltage source for prefix
-                    prospective_prefix = 'V'
-                    if self.debug:
-                        print(f"InitialNetlist: YOLO class '{yolo_class}' with reason SIGN. Using prefix 'V'. UID: {persistent_uid}")
-
-                component_type_prefix = prospective_prefix
-                
-                if not component_type_prefix: # Should be caught by default 'UN' earlier if mapping failed
-                    if self.debug:
-                        print(f"Warning: Component {yolo_class} resulted in empty component_type_prefix. Skipping UID {persistent_uid}.")
-                    continue
-                    
-                # Find the other node this component is connected to
                 other_node_id = None
                 for other_n_data in node_list:
                     if other_n_data['id'] != current_node_id:
-                        # Check against persistent_uid as components are deepcopied
                         if any(c.get('persistent_uid') == persistent_uid for c in other_n_data['components']):
                             other_node_id = other_n_data['id']
                             break
-                            
-                if other_node_id is None:
-                    if self.debug:
-                        print(f"Warning: Could not find second node for component UID {persistent_uid} ({component_class}). Skipping.")
-                    continue
                 
-                # Get centroids for the connected nodes
-                current_node_centroid = node_centroids.get(current_node_id)
-                other_node_centroid = node_centroids.get(other_node_id)
+                # REVISED LOGIC BLOCK
+                current_yolo_class = component.get('class') # Class after potential reclassification
 
-                if current_node_centroid is None or other_node_centroid is None:
+                if current_yolo_class == 'terminal': 
+                    # This means it was 'terminal' and prelim check found < 2 connections
                     if self.debug:
-                        print(f"Warning: Missing centroid for one of the nodes ({current_node_id}, {other_node_id}) connected to UID {persistent_uid}. Using arbitrary node order.")
-                    # Fallback: use original IDs, no directed assignment possible
-                    assigned_node1_id, assigned_node2_id = current_node_id, other_node_id
-                else:
-                    # Determine primary and secondary nodes using semantic direction
-                    # The component_bbox is already in the same coordinate space as centroids.
-                    primary_centroid, secondary_centroid = self._get_terminal_nodes_relative_to_bbox(
-                        component, # Pass the full component dict
-                        component_semantic_direction, 
-                        current_node_centroid, 
-                        other_node_centroid, 
-                        component_class,
-                        semantic_reason # Pass the reason
-                    )
+                        print(f"NetlistGen: Component UID {persistent_uid} is still 'terminal'. Classifying as type 'N'.")
+                    component_type_prefix = self.netlist_map.get('terminal', 'N')
+                    node_1 = current_node_id
+                    node_2 = '0'  # Default other node to ground for a true terminal type 'N'
+                    value = "None"
+                else: 
+                    # Component is not 'terminal' (either originally, or reclassified from terminal e.g. to 'voltage.dc')
+                    if other_node_id is None:
+                        # This case should be rare if reclassification worked, but as a safeguard
+                        if self.debug:
+                            print(f"Warning: Non-terminal component UID {persistent_uid} ({current_yolo_class}) has no second node. Skipping.")
+                        continue
                     
-                    # Map back from centroids to original node IDs
-                    if primary_centroid == current_node_centroid:
+                    # Determine component_type_prefix. 
+                    # LLaMA would have run on the current_yolo_class if it was eligible.
+                    prospective_prefix = self.netlist_map.get(current_yolo_class, 'UN')
+                    reason_for_prefix = component.get('semantic_reason', 'UNKNOWN') # From LLaMA output
+
+                    # Apply LLaMA-based prefix adjustments if applicable
+                    if current_yolo_class in self.voltage_classes_names and reason_for_prefix == "ARROW":
+                        prospective_prefix = 'I'
+                    elif current_yolo_class in self.current_source_classes_names and reason_for_prefix == "SIGN":
+                        prospective_prefix = 'V'
+                    component_type_prefix = prospective_prefix
+
+                    if not component_type_prefix:
+                        if self.debug:
+                            print(f"Warning: Component {current_yolo_class} (UID: {persistent_uid}) resulted in empty component_type_prefix. Skipping.")
+                        continue
+
+                    # Node ordering using centroids and LLaMA-derived semantic direction
+                    current_node_centroid_val = node_centroids.get(current_node_id)
+                    other_node_centroid_val = node_centroids.get(other_node_id)
+
+                    if current_node_centroid_val is None or other_node_centroid_val is None:
+                        if self.debug:
+                            print(f"Warning: Missing centroid for nodes ({current_node_id}, {other_node_id}) for UID {persistent_uid}. Arbitrary node order.")
                         assigned_node1_id, assigned_node2_id = current_node_id, other_node_id
                     else:
-                        assigned_node1_id, assigned_node2_id = other_node_id, current_node_id
-
-                # Grounding and final node assignment
-                # If it's a ground component, one node must be 0.
-                if component_class in ['gnd', 'vss']:
-                    # The non-ground node is assigned_node1_id (or assigned_node2_id if it was the primary one)
-                    # The other one becomes 0.
-                    if assigned_node1_id == 0: # Should not happen if 0 is not a normal node ID
-                         true_node = assigned_node2_id
+                        # component_semantic_direction is from the bbox, potentially set by LLaMA
+                        primary_centroid, secondary_centroid = self._get_terminal_nodes_relative_to_bbox(
+                            component, 
+                            component_semantic_direction, 
+                            current_node_centroid_val, 
+                            other_node_centroid_val, 
+                            current_yolo_class, # Use the current class (potentially reclassified)
+                            semantic_reason     # Use reason from LLaMA
+                        )
+                        if primary_centroid == current_node_centroid_val:
+                            assigned_node1_id, assigned_node2_id = current_node_id, other_node_id
+                        else:
+                            assigned_node1_id, assigned_node2_id = other_node_id, current_node_id
+                    
+                    # Final node assignment (handling gnd)
+                    if current_yolo_class in ['gnd', 'vss']:
+                        if assigned_node1_id == 0:
+                            true_node = assigned_node2_id
+                        else:
+                            true_node = assigned_node1_id
+                        node_1, node_2 = true_node, 0
                     else:
-                         true_node = assigned_node1_id # Assume this is the actual connection point
-                    node_1, node_2 = true_node, 0
-                # For other components, directly use the assigned primary and secondary nodes
-                # The directionality is already embedded in assigned_node1_id (N+) and assigned_node2_id (N-)
-                else:
-                    node_1 = assigned_node1_id
-                    node_2 = assigned_node2_id
+                        node_1 = assigned_node1_id
+                        node_2 = assigned_node2_id
+                    value = "None" # Placeholder for VLM
+                # END OF REVISED LOGIC BLOCK
                 
-                # For AC sources, value might be complex (e.g. "10V:30deg"), handle later by Gemini.
-                # For DC sources, value could be simple voltage.
-                value = "None"  # Placeholder value, to be filled by fix_netlist using Gemini
-                
+                if not component_type_prefix: # Safeguard: if prefix ended up empty, skip
+                    if self.debug:
+                        print(f"NetlistGen: Skipping component UID {persistent_uid} due to empty final component_type_prefix.")
+                    continue
+
                 # Get unique component ID (R1, C1, etc.)
                 if component_type_prefix not in component_counters:
-                     component_counters[component_type_prefix] = 1 # Should be pre-initialized, but as a safeguard
+                     component_counters[component_type_prefix] = 1
                 comp_num = component_counters[component_type_prefix]
                 component_counters[component_type_prefix] += 1
                 # component_full_id = f"{component_type_prefix}{comp_num}" # This is just for logging/debug if needed
@@ -1820,29 +1826,30 @@ Example responses:
                 print("Groq client not initialized. Skipping semantic direction enrichment.")
             return
         
-
-        numeric_classes_of_interest = {6, 7, 8, 17, 18, 19, 29, 22} 
-        confidence_threshold = 0.4 
+        # MODIFICATION: Removed hardcoded numeric_classes_of_interest and confidence_threshold
+        # These are now based on self.llama_numeric_classes_of_interest and self.llama_classes_of_interest_names
+        # A confidence threshold can be added as a class attribute or parameter if needed.
 
         for bbox in bboxes:
-            yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp') # Assuming this was added during initial YOLO parsing
+            yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp') 
+            # Fallback to look up ID if _yolo_class_id_temp wasn't set (e.g. if reclassification failed to set it)
             if yolo_numeric_cls_id is None:
-                 # If not present, try to find it by matching string class name back to ID
-                 # This is less ideal but a fallback.
                 string_class_name_for_id_lookup = bbox.get('class')
                 for num_id, name_str in self.yolo_class_names_map.items():
                     if name_str == string_class_name_for_id_lookup:
                         yolo_numeric_cls_id = num_id
+                        bbox['_yolo_class_id_temp'] = num_id # Also set it for consistency
                         break
             
-            confidence = bbox.get('confidence', 0.0)
-            component_string_class_name = bbox.get('class') # String name like 'voltage.dc'
+            confidence = bbox.get('confidence', 0.0) # Keep confidence if needed for a threshold check later
+            component_string_class_name = bbox.get('class')
 
+            # MODIFIED CONDITION: Use class attributes for selecting components for LLaMA
             if yolo_numeric_cls_id is not None and \
-               yolo_numeric_cls_id in numeric_classes_of_interest and \
-               confidence >= confidence_threshold and \
+               yolo_numeric_cls_id in self.llama_numeric_classes_of_interest and \
                component_string_class_name is not None and \
-               component_string_class_name in self.classes_of_interest_names:
+               component_string_class_name in self.llama_classes_of_interest_names: 
+               # Add confidence check here if desired, e.g.: and confidence >= self.llama_confidence_threshold
                 
                 # Crop the component from the original image
                 orig_xmin, orig_ymin = int(bbox['xmin']), int(bbox['ymin'])
@@ -1895,3 +1902,124 @@ Example responses:
                 bbox['semantic_direction'] = None
                 bbox['semantic_reason'] = None # Ensure reason is also None
         # No explicit return, bboxes list is modified in-place.
+
+    def reclassify_terminals_based_on_connectivity(self, image_rgb_original, bboxes_list_to_modify):
+        """
+        Performs a preliminary connectivity analysis to reclassify 'terminal' components.
+        Modifies bboxes_list_to_modify in-place if a 'terminal' is connected to >= 2 nodes.
+        
+        Args:
+            image_rgb_original (np.ndarray): The original image (RGB).
+            bboxes_list_to_modify (List[Dict]): The list of bounding boxes from YOLO (e.g., bboxes_orig_coords_nms).
+        """
+        if self.debug:
+            print("Starting preliminary reclassification of 'terminal' components...")
+
+        # 1. Basic Segmentation and Contour Extraction (on a copy to avoid side effects)
+        #    We use a simplified mask approach here, similar to what get_node_connections might do initially.
+        #    This operates on the original, uncropped image.
+        
+        # Create a BGR version for OpenCV functions if needed, assuming image_rgb_original is RGB
+        image_bgr_original = cv2.cvtColor(image_rgb_original, cv2.COLOR_RGB2BGR)
+        
+        # Get a basic segmented mask (e.g., black lines on white background)
+        # Note: segment_circuit returns a binary inverted mask (lines are white 255, bg is 0)
+        segmented_mask_for_prelim = self.segment_circuit(image_bgr_original) 
+
+        # Get an "emptied" version of this mask, where component bodies are zeroed out.
+        # get_emptied_mask internally calls segment_circuit again if it needs to,
+        # but here we pass the already segmented one.
+        # However, get_emptied_mask expects BGR image, and bboxes_list_to_modify are in original image coords.
+        # We need to be careful here. Let's re-evaluate.
+        # get_emptied_mask is designed to work on the visual image.
+        
+        # Let's use the direct path: segment, then manually empty based on bboxes_list_to_modify
+        # to create a mask of just the wires.
+        
+        prelim_wire_mask = segmented_mask_for_prelim.copy()
+        components_to_ignore_for_emptying = ('crossover', 'junction', 'circuit', 'vss') # Similar to get_emptied_mask
+        
+        for bbox_prelim in bboxes_list_to_modify:
+            if bbox_prelim.get('class') not in components_to_ignore_for_emptying:
+                ymin, ymax = int(bbox_prelim['ymin']), int(bbox_prelim['ymax'])
+                xmin, xmax = int(bbox_prelim['xmin']), int(bbox_prelim['xmax'])
+                prelim_wire_mask[max(0, ymin):min(prelim_wire_mask.shape[0], ymax), 
+                                 max(0, xmin):min(prelim_wire_mask.shape[1], xmax)] = 0
+        
+        if self.debug:
+            self.show_image(prelim_wire_mask, "Prelim - Wire Mask for Terminal Reclassification")
+
+        # Now, find contours on this prelim_wire_mask
+        # get_contours expects lines to be white on black if auto-inversion happens,
+        # or black lines on white if mean is low. Our prelim_wire_mask has wires as 0 (black)
+        # and background as 255 (white) after emptying components from an inverted segment_circuit output.
+        # This might require an inversion before get_contours or careful handling within.
+        # segment_circuit output: lines=255, bg=0.
+        # prelim_wire_mask after emptying: components are 0, wires could be 255, bg could be 0.
+        # Let's ensure wires are white (255) and everything else is black (0) for get_contours.
+        
+        # If segment_circuit makes lines 255 and bg 0:
+        # prelim_wire_mask initially has lines as 255, bg as 0.
+        # When we empty components (bbox_prelim['class'] not in components_to_ignore_for_emptying),
+        # those areas become 0. So, wires remain 255. This should be fine for get_contours.
+        
+        # get_contours typically expects an inverted image (lines white, background black) or will invert it.
+        # Our prelim_wire_mask should have wires as 255 (white) and non-wire areas as 0 (black).
+        prelim_contours, _ = self.get_contours(prelim_wire_mask, area_threshold=0.0001) # Use a smaller threshold for prelim
+
+        if self.debug:
+            print(f"Prelim Reclass: Found {len(prelim_contours)} contours.")
+            if not prelim_contours:
+                print("Prelim Reclass: No contours found. Cannot reclassify terminals.")
+                return # bboxes_list_to_modify remains unchanged
+
+        # 2. Iterate through bboxes and check 'terminal' components
+        voltage_dc_numeric_id = None
+        for num_id, name_str in self.yolo.model.names.items():
+            if name_str == 'voltage.dc':
+                voltage_dc_numeric_id = num_id
+                break
+        
+        if voltage_dc_numeric_id is None and self.debug:
+            print("Prelim Reclass Warning: Could not find numeric ID for 'voltage.dc'. Reclassification might be incomplete.")
+
+        for i, bbox_to_check in enumerate(bboxes_list_to_modify):
+            if bbox_to_check.get('class') == 'terminal':
+                connected_contour_ids = set()
+                # Check connectivity to each contour. We need a pixel threshold for proximity.
+                # The bboxes are in original image coordinates. Contours are also from original image mask.
+                pixel_threshold_for_reclass = 10 # Adjustable
+
+                for contour_item in prelim_contours:
+                    contour_path = contour_item['contour'] # Array of points (x,y)
+                    # Check if any point on the contour is near the bbox_to_check
+                    for point_array in contour_path:
+                        point_on_contour = tuple(point_array[0])
+                        if self.is_point_near_bbox(point_on_contour, bbox_to_check, pixel_threshold_for_reclass):
+                            connected_contour_ids.add(contour_item['id'])
+                            break # This contour is connected, move to the next contour
+                
+                num_distinct_connections = len(connected_contour_ids)
+                
+                if self.debug:
+                    print(f"Prelim Reclass: Terminal UID {bbox_to_check.get('persistent_uid')} connected to {num_distinct_connections} distinct contours.")
+
+                if num_distinct_connections >= 2:
+                    if self.debug:
+                        print(f"Prelim Reclass: CHANGING class of UID {bbox_to_check.get('persistent_uid')} from 'terminal' to 'voltage.dc'.")
+                    
+                    original_yolo_class_name = bbox_to_check['class']
+                    bbox_to_check['original_yolo_class_if_reclassified'] = original_yolo_class_name # Store original
+                    bbox_to_check['class'] = 'voltage.dc' # New class
+                    
+                    if voltage_dc_numeric_id is not None:
+                        bbox_to_check['_yolo_class_id_temp'] = voltage_dc_numeric_id
+                    else:
+                        if self.debug:
+                             print(f"Prelim Reclass Warning: Numeric ID for 'voltage.dc' missing, _yolo_class_id_temp not updated for UID {bbox_to_check.get('persistent_uid')}.")
+                    
+                    # Mark that it was reclassified for later logic if needed
+                    bbox_to_check['was_reclassified_from_terminal'] = True 
+        if self.debug:
+            print("Finished preliminary reclassification of 'terminal' components.")
+        # bboxes_list_to_modify has been updated in-place.

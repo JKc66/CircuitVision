@@ -524,10 +524,10 @@ if st.session_state.active_results['original_image'] is not None:
                 elif not hasattr(analyzer, 'last_llama_input_images'):
                     st.info("LLaMA input images attribute ('last_llama_input_images') not found on analyzer. Ensure CircuitAnalyzer initializes this attribute in debug mode.")
                 elif not analyzer.last_llama_input_images: # This means the dict exists but is empty
-                    st.info("LLaMA input images dictionary is empty. Although debug mode appears active, no images were stored by CircuitAnalyzer during LLaMA processing. This might indicate an issue within CircuitAnalyzer's image storing logic for this debug feature.")
+                    st.info("LLaMA debug: No input images were stored by the analyzer for LLaMA processing. Check component types or analyzer logic if images were expected.")
                 else:
                     # This is the success case: bboxes exist, attribute exists, and dict is not empty
-                    st.success("results success")
+                    st.success("✅")
                     
                     found_at_least_one_image_to_display = False
                     for comp_bbox in st.session_state.active_results['bboxes']:
