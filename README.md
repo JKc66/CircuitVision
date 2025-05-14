@@ -6,13 +6,13 @@
 
 <p align="center">
   <a href="https://app.jawadk.me/circuits/" target="_blank">
-    <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" />
+    <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white" />
   </a>
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
-    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?style=for-the-badge&cacheBust=2" />
+    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision?cacheBust=2" />
   </a>
     <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
-    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision?style=for-the-badge" />
+    <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision" />
   </a>
   <a href="https://deepwiki.com/JKc66/CircuitVision" target="_blank">
     <img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" />
@@ -52,6 +52,11 @@ CircuitVision is an innovative application designed to bridge the gap between vi
 Our goal is to automate the tedious process of manual circuit transcription, enabling engineers, students, and hobbyists to quickly digitize, understand, and simulate **electrical circuits** with unprecedented ease and accuracy.
 
 ## ✨ Key Features & The Engineering Behind Them
+
+<p align="center">
+  <img width="100%" src="static/images/workflow_diagram.png" />
+</p>
+<p align="center"><i>Overall workflow of the CircuitVision project.</i></p>
 
 ### 👁️ Advanced Component Detection (Fine-Tuned YOLOv11)
 * Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images. **We obtained a mean average percision (mAp-50) of 0.9313, which is on bar with SOTA detection models.**
