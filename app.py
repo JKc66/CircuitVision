@@ -516,6 +516,23 @@ if st.session_state.active_results['original_image'] is not None:
                     if stats_data:
                         st.table(stats_data)
             
+            # Expander for Initial YOLO Detections (on original image)
+            with st.expander("🔍 Debug: Initial YOLO Detections (Original Image)"):
+                if 'bboxes_orig_coords_nms' in st.session_state.active_results and \
+                   st.session_state.active_results['bboxes_orig_coords_nms'] is not None and \
+                   'original_image' in st.session_state.active_results and \
+                   st.session_state.active_results['original_image'] is not None:
+                    
+                    # Create an annotated image using the *original* image and *original coordinates* bboxes
+                    # Ensure create_annotated_image can handle the bboxes_orig_coords_nms format
+                    initial_yolo_annotated_img = create_annotated_image(
+                        st.session_state.active_results['original_image'],
+                        st.session_state.active_results['bboxes_orig_coords_nms']
+                    )
+                    st.image(initial_yolo_annotated_img, caption="Initial YOLO detections on original image before any cropping or reclassification (except NMS)", use_container_width=True)
+                else:
+                    st.info("Initial YOLO detection data or original image not available in session state.")
+
             # Expander for LLaMA Stage 1 (Direction) Debug Output
             with st.expander("↗️ Debug: LLaMA Directions"):
                 # Check prerequisites first

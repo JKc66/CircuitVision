@@ -66,6 +66,10 @@ The development trajectory since the introduction of Non-Maximum Suppression (NM
 *   **Shift to Exclusive YOLO-Based Crop Initiation:** The primary decision to crop the input image is now exclusively driven by the analysis of YOLO component detections. The `crop_image_and_adjust_bboxes` method in `CircuitAnalyzer` no longer uses `sam_extent_bbox` (from SAM2) as a fallback for initiating a crop. If YOLO components do not form a viable basis for cropping (e.g., no components detected, or no significant cluster found), the original image dimensions are retained for subsequent analysis.
 *   **Sequential Processing:** The analysis pipeline (`run_segmentation_and_cropping` in `analysis_pipeline.py`) was restructured to first perform this YOLO-driven crop. If SAM2 segmentation is enabled, it is then executed on the (potentially) YOLO-cropped image, ensuring the SAM2 mask aligns with the adjusted image canvas.
 *   **Adaptive Clustering Threshold for YOLO Components:** To improve the accuracy of identifying the main circuit body from YOLO detections, the `clustering_prox_threshold` within `crop_image_and_adjust_bboxes` was made adaptive. It is now calculated based on the average diagonal size of the detected `component_type_bboxes`. Specifically, the threshold is set to `max(int(average_diagonal * 2.5), 40)`, allowing the clustering to be more sensitive to the scale and density of components and preventing distant, isolated components from being incorrectly grouped with the main circuit.
+*   **Enhanced Clustering with Junction Inclusion (May 15, 2025):** The cropping logic in `crop_image_and_adjust_bboxes` was further refined to improve the accuracy of identifying the main circuit body:
+    *   **Junctions in Clustering Graph:** The set of elements used for graph-based clustering (`elements_for_clustering`) was expanded to include bboxes of class 'junction', in addition to other actual components (excluding text, explanatory, etc.). This allows the clustering algorithm to form more structurally sound component groups by directly utilizing junctions as connection points.
+    *   **Revised Adaptive Proximity Threshold:** The calculation of `clustering_prox_threshold` was updated. It now prioritizes the average diagonal size of *non-junction components* for a more stable reference (multiplier `2.0`, min `30px`). If only junctions are available, their average size is used (multiplier `2.5`, min `20px`). This makes the threshold more sensitive to the actual component sizes while still adapting if only small connecting elements are present.
+    *   **Refined Cluster Scoring:** When scoring clusters for text association, only *actual components* (not junctions) within a cluster are considered for having nearby text. This ensures that the preference for clusters with labeled components is maintained, even though junctions now contribute to the cluster formation.
 
 #### 4. Fallback Strategy for SAM2 Unavailability
 *   **Challenge:** If the SAM2 models were not configured, missing, or failed to load, the system could either fail or produce degraded results due to dependencies on segmentation.
@@ -149,22 +153,8 @@ The generation of the final, usable netlist involves a sophisticated multi-stage
 *   **Reduced Enumeration Font Size:** The font scale and thickness for enumeration numbers in `src/circuit_analyzer.py` were made smaller to reduce clutter and overlap. The calculation was changed from `font_scale = max(0.5, image_height / 700.0)` and `thickness = int(max(1, image_height / 400.0))` to `font_scale = max(0.4, image_height / 900.0)` and `thickness = int(max(1, image_height / 600.0))`.
 *   **Conditional Component Numbering:**
     *   Implemented logic in `enumerate_components` (within `src/circuit_analyzer.py`) to only assign a visual enumeration number to a component if there is an existing text element (like a value or label) in close proximity to that component.
-    *   A new helper function `are_bboxes_proximal(bbox1, bbox2, proximity_threshold)` was introduced to determine if two bounding boxes are close enough (either overlapping or within a specified pixel distance of each other's edges). This is used to check for nearby text.
-    *   This change aims to reduce visual noise by not numbering components that are likely decorative or don't have explicit values/labels shown on the schematic.
-
-# Revised logic for zeroing out:
-# Zero out if it's an "actual component" (not in non_components)
-# UNLESS it's a special case we want to keep for wire structure (e.g. tiny terminals if they were part of wires)
-# For now, the existing `components_to_preserve_locally` seems to handle specific preservations.
-# If a 'terminal' (original YOLO classification) is *not* in `components_to_preserve_locally`, it gets zeroed.
-# This is likely the desired behavior to remove the body of a source that might still be called 'terminal'
-# if reclassification didn't catch it but LLaMA/VLM will.
-
-components_to_preserve_locally_in_mask = ('crossover', 'junction', 'circuit', 'vss') 
-
-if bbox_comp['class'] not in components_to_preserve_locally_in_mask:
-    if self.debug and is_problematic_terminal_current_bbox:
-        print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) is NOT in components_to_preserve_locally_in_mask. Will be ZEROED OUT by this loop.") 
+    *   A new helper function `are_bboxes_proximal(bbox1, bbox2, proximity_threshold)` was introduced to determine if two bounding boxes are close enough (either overlapping or within a specified pixel distance of each other\'s edges). This is used to check for nearby text.
+    *   This change aims to reduce visual noise by not numbering components that are likely decorative or don\'t have explicit values/labels shown on the schematic.
 
 ## III. User Interface (UI), Visualization, and Workflow Enhancements
 
@@ -222,29 +212,3 @@ if bbox_comp['class'] not in components_to_preserve_locally_in_mask:
     *   **Log Verbosity Reduction (Commit `orin`):** Suppressed verbose logging output from the `groq._base_client` by setting its log level to `WARNING`. This helps to reduce noise in the application logs, making it easier to find relevant information.
     *   **Log Message Clarification (Commit `orin`):** An existing logging message related to the automatic processing of example images was clarified. The message now more accurately reflects the condition where an example is not processed because the last processed item was an upload, even if the widget selection for the example itself did not change.
     *   *Note: The changes in commits `0919b581` ("caption"), `a51ec07b` ("classes"), and `f268692e` ("44") are understood to contribute to these overarching stability and refinement efforts. More specific technical details for these commits would require further code review.*
-
-### E. Component Enumeration and Visualization Enhancements (May 15, 2025 - Ongoing Interactive Refinement)
-*   **Optimized Enumeration Number Placement:** The `find_optimal_position` helper within `enumerate_components` in `src/circuit_analyzer.py` was significantly refactored to:
-    *   Prioritize placing numbers immediately adjacent to components.
-    *   Avoid overlaps with other components, other numbers, and existing schematic text.
-    *   Dynamically calculate the best position based on Euclidean distance to the component center from a set of candidates.
-    *   Initially, background-aware scoring was used, but this was later removed to simplify logic and focus on geometric placement, then reintroduced with distance-based sorting as the primary factor.
-*   **Reduced Enumeration Font Size:** The font scale and thickness for enumeration numbers in `src/circuit_analyzer.py` were made smaller to reduce clutter and overlap. The calculation was changed from `font_scale = max(0.5, image_height / 700.0)` and `thickness = int(max(1, image_height / 400.0))` to `font_scale = max(0.4, image_height / 900.0)` and `thickness = int(max(1, image_height / 600.0))`.
-*   **Conditional Component Numbering:**
-    *   Implemented logic in `enumerate_components` (within `src/circuit_analyzer.py`) to only assign a visual enumeration number to a component if there is an existing text element (like a value or label) in close proximity to that component.
-    *   A new helper function `are_bboxes_proximal(bbox1, bbox2, proximity_threshold)` was introduced to determine if two bounding boxes are close enough (either overlapping or within a specified pixel distance of each other's edges). This is used to check for nearby text.
-    *   This change aims to reduce visual noise by not numbering components that are likely decorative or don't have explicit values/labels shown on the schematic.
-
-# Revised logic for zeroing out:
-# Zero out if it's an "actual component" (not in non_components)
-# UNLESS it's a special case we want to keep for wire structure (e.g. tiny terminals if they were part of wires)
-# For now, the existing `components_to_preserve_locally` seems to handle specific preservations.
-# If a 'terminal' (original YOLO classification) is *not* in `components_to_preserve_locally`, it gets zeroed.
-# This is likely the desired behavior to remove the body of a source that might still be called 'terminal'
-# if reclassification didn't catch it but LLaMA/VLM will.
-
-components_to_preserve_locally_in_mask = ('crossover', 'junction', 'circuit', 'vss') 
-
-if bbox_comp['class'] not in components_to_preserve_locally_in_mask:
-    if self.debug and is_problematic_terminal_current_bbox:
-        print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) is NOT in components_to_preserve_locally_in_mask. Will be ZEROED OUT by this loop.") 

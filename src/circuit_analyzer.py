@@ -962,6 +962,13 @@ class CircuitAnalyzer():
         
         return h_dist <= proximity_threshold and v_dist <= proximity_threshold
 
+    def _component_has_nearby_text(self, component_bbox, text_bboxes, proximity_threshold=30):
+        """Checks if a component bounding box has any text bounding box nearby."""
+        for text_bbox in text_bboxes:
+            if self._are_bboxes_proximal_for_clustering(component_bbox, text_bbox, proximity_threshold):
+                return True
+        return False
+
     def crop_image_and_adjust_bboxes(self, image_to_crop, all_yolo_bboxes_input, padding=20):
         """
         Crops an image based on a defining bounding box (derived from YOLO component clusters)
@@ -983,7 +990,6 @@ class CircuitAnalyzer():
             'crop_applied': False,
             'reason_for_no_crop': None,
             'original_image_dims': (original_width, original_height),
-            # 'input_sam_extent_bbox': sam_extent_bbox, # SAM extent no longer directly used for decision here
             'num_total_yolo_bboxes': len(all_yolo_bboxes_input),
             'num_component_type_bboxes': 0,
             'num_text_type_bboxes': 0,
@@ -1007,44 +1013,61 @@ class CircuitAnalyzer():
         text_type_bboxes = [b for b in all_yolo_bboxes_input if b.get('class') == 'text']
         crop_debug_info['num_component_type_bboxes'] = len(component_type_bboxes)
         crop_debug_info['num_text_type_bboxes'] = len(text_type_bboxes)
+        
+        elements_for_clustering = [
+        b for b in all_yolo_bboxes_input 
+        if b.get('class') not in {'text', 'explanatory', 'circuit', 'vss', 'crossover'} 
+        ]
+        if self.debug:
+            print(f"Crop: Number of elements for clustering (components + junctions): {len(elements_for_clustering)}")
 
         crop_basis_bbox = None # This will be (xmin, ymin, xmax, ymax) tuple
 
-        if not component_type_bboxes:
-            if self.debug: print("Crop: No component-type YOLO bboxes found. No basis for YOLO-only crop.")
-            crop_debug_info['reason_for_no_crop'] = "no_component_bboxes_for_yolo_crop"
-            crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_yolo_components"
+        if not elements_for_clustering: # MODIFIED from component_type_bboxes
+            if self.debug: print("Crop: No elements_for_clustering (components or junctions) found. No basis for crop.") # MODIFIED
+            crop_debug_info['reason_for_no_crop'] = "no_elements_for_clustering" # MODIFIED
+            crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_clustering_elements" # MODIFIED
             return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
         else:
-            # Build adjacency list for component_type_bboxes
-            adj = {i: [] for i in range(len(component_type_bboxes))}
+            # Build adjacency list for elements_for_clustering # MODIFIED
+            adj = {i: [] for i in range(len(elements_for_clustering))} # MODIFIED
             
             # Dynamic proximity threshold for clustering
             # Calculate average component size for a more adaptive threshold
-            if component_type_bboxes:
-                avg_w = sum(b['xmax'] - b['xmin'] for b in component_type_bboxes) / len(component_type_bboxes)
-                avg_h = sum(b['ymax'] - b['ymin'] for b in component_type_bboxes) / len(component_type_bboxes)
+            non_junction_elements_for_sizing = [el for el in elements_for_clustering if el.get('class') != 'junction']
+            avg_diag = 0 # Initialize avg_diag
+            if non_junction_elements_for_sizing:
+                avg_w = sum(b['xmax'] - b['xmin'] for b in non_junction_elements_for_sizing) / len(non_junction_elements_for_sizing)
+                avg_h = sum(b['ymax'] - b['ymin'] for b in non_junction_elements_for_sizing) / len(non_junction_elements_for_sizing)
                 avg_diag = np.sqrt(avg_w**2 + avg_h**2)
-                clustering_prox_threshold = max(int(avg_diag * 2.5), 40) # 2.5x avg diagonal, min 40px
+                clustering_prox_threshold = max(int(avg_diag * 2.0), 30) # MODIFIED: Multiplier 2.0, min 30
                 if self.debug:
-                    print(f"Crop: Avg component w: {avg_w:.2f}, h: {avg_h:.2f}, diag: {avg_diag:.2f}")
-                    print(f"Crop: Calculated adaptive clustering_prox_threshold: {clustering_prox_threshold}px")
+                    print(f"Crop: Avg NON-JUNCTION component w: {avg_w:.2f}, h: {avg_h:.2f}, diag: {avg_diag:.2f}")
+                    print(f"Crop: Calculated adaptive clustering_prox_threshold (non-junctions): {clustering_prox_threshold}px")
+            elif elements_for_clustering: # Fallback: if only junctions are available for sizing
+                avg_w = sum(b['xmax'] - b['xmin'] for b in elements_for_clustering) / len(elements_for_clustering)
+                avg_h = sum(b['ymax'] - b['ymin'] for b in elements_for_clustering) / len(elements_for_clustering)
+                avg_diag = np.sqrt(avg_w**2 + avg_h**2)
+                clustering_prox_threshold = max(int(avg_diag * 2.5), 20) # MODIFIED: Min 20 for junction-only
+                if self.debug:
+                    print(f"Crop: Only junctions found for sizing. Avg junction w: {avg_w:.2f}, h: {avg_h:.2f}, diag: {avg_diag:.2f}")
+                    print(f"Crop: Calculated adaptive clustering_prox_threshold (junctions only): {clustering_prox_threshold}px")
             else:
-                # Fallback if somehow component_type_bboxes is empty here, though outer check should prevent
-                clustering_prox_threshold = 75 # Default fixed if no components to measure
+                # This case should ideally not be reached if elements_for_clustering is not empty
+                clustering_prox_threshold = 50 # Absolute fallback 
             
             crop_debug_info['clustering_proximity_threshold'] = clustering_prox_threshold
 
-            for i in range(len(component_type_bboxes)):
-                for j in range(i + 1, len(component_type_bboxes)):
-                    if self._are_bboxes_proximal_for_clustering(component_type_bboxes[i], component_type_bboxes[j], proximity_threshold=clustering_prox_threshold):
+            for i in range(len(elements_for_clustering)): # MODIFIED
+                for j in range(i + 1, len(elements_for_clustering)): # MODIFIED
+                    if self._are_bboxes_proximal_for_clustering(elements_for_clustering[i], elements_for_clustering[j], proximity_threshold=clustering_prox_threshold): # MODIFIED
                         adj[i].append(j)
                         adj[j].append(i)
 
             # Find connected components (DFS)
-            visited_indices = [False] * len(component_type_bboxes)
+            visited_indices = [False] * len(elements_for_clustering) # MODIFIED
             clusters_of_bboxes_list = [] # List of lists of bbox dicts
-            for i in range(len(component_type_bboxes)):
+            for i in range(len(elements_for_clustering)): # MODIFIED
                 if not visited_indices[i]:
                     current_cluster_member_bboxes = []
                     component_indices_in_stack = [i]
@@ -1052,7 +1075,7 @@ class CircuitAnalyzer():
                         u_idx = component_indices_in_stack.pop()
                         if not visited_indices[u_idx]:
                             visited_indices[u_idx] = True
-                            current_cluster_member_bboxes.append(component_type_bboxes[u_idx])
+                            current_cluster_member_bboxes.append(elements_for_clustering[u_idx]) # MODIFIED
                             # Iterate over neighbors from adjacency list
                             for v_neighbor_idx in adj[u_idx]:
                                 if not visited_indices[v_neighbor_idx]:
@@ -1063,28 +1086,105 @@ class CircuitAnalyzer():
             crop_debug_info['num_clusters_found'] = len(clusters_of_bboxes_list)
 
             if not clusters_of_bboxes_list:
-                if self.debug: print("Crop: Component bboxes found, but no clusters formed (all isolated). Using union of all components.")
-                min_x = min(b['xmin'] for b in component_type_bboxes)
-                min_y = min(b['ymin'] for b in component_type_bboxes)
-                max_x = max(b['xmax'] for b in component_type_bboxes)
-                max_y = max(b['ymax'] for b in component_type_bboxes)
+                if self.debug: print("Crop: Elements for clustering found, but no clusters formed. Using union of all elements.") # MODIFIED
+                min_x = min(b['xmin'] for b in elements_for_clustering) # MODIFIED
+                min_y = min(b['ymin'] for b in elements_for_clustering) # MODIFIED
+                max_x = max(b['xmax'] for b in elements_for_clustering) # MODIFIED
+                max_y = max(b['ymax'] for b in elements_for_clustering) # MODIFIED
                 crop_basis_bbox = (min_x, min_y, max_x, max_y)
-                crop_debug_info['crop_decision_source'] = "union_of_isolated_yolo_components"
-                crop_debug_info['main_cluster_info'] = "all_isolated_used_union"
+                crop_debug_info['crop_decision_source'] = "union_of_isolated_elements_for_clustering" # MODIFIED
+                crop_debug_info['main_cluster_info'] = "all_elements_isolated_used_union" # MODIFIED
             else:
-                # Identify main cluster (largest by number of bboxes)
-                main_cluster_actual_bboxes = max(clusters_of_bboxes_list, key=len)
-                crop_debug_info['main_cluster_info'] = {
-                    'num_bboxes': len(main_cluster_actual_bboxes),
-                    'example_uid': main_cluster_actual_bboxes[0].get('persistent_uid') if main_cluster_actual_bboxes else "N/A"
-                }
+                # Refined main cluster selection:
+                # Score clusters by component count and text association.
+                # Use avg_diag from the sizing calculation (non-junction preferred, initialized to 0 if no elements for sizing)
+                current_avg_diag_for_text_prox = avg_diag if avg_diag > 0 else 30 # Fallback for text prox if avg_diag is 0
+                text_association_proximity_for_cluster_scoring = max(int(current_avg_diag_for_text_prox * 0.75), 25)
                 
+                scored_clusters = []
+                for i, cluster_candidate_bboxes in enumerate(clusters_of_bboxes_list):
+                    text_associated_components_in_cluster = 0
+                    # Only count text association for actual components, not junctions
+                    actual_components_in_this_cluster = [b for b in cluster_candidate_bboxes if b.get('class') != 'junction']
+                    for comp_b in actual_components_in_this_cluster: # Iterate over actual components
+                        if self._component_has_nearby_text(comp_b, text_type_bboxes, text_association_proximity_for_cluster_scoring):
+                            text_associated_components_in_cluster += 1
+                    
+                    # Score: primary by num text-associated (actual) components, secondary by total elements in cluster
+                    score = (text_associated_components_in_cluster, len(cluster_candidate_bboxes))
+                    scored_clusters.append({
+                        'bboxes': cluster_candidate_bboxes, 
+                        'score': score, 
+                        'id': i,
+                        'text_assoc_count': text_associated_components_in_cluster,
+                        'total_elements_in_cluster': len(cluster_candidate_bboxes), # New field
+                        'actual_components_in_cluster': len(actual_components_in_this_cluster), # New field
+                        })
+                    if self.debug:
+                        print(f"Crop: Cluster {i} - Score: {score}, TextAssocActualComps: {text_associated_components_in_cluster}, TotalElements: {len(cluster_candidate_bboxes)}, ActualComps: {len(actual_components_in_this_cluster)}")
+
+                # Sort clusters: highest score first
+                scored_clusters.sort(key=lambda c: c['score'], reverse=True)
+                
+                main_cluster_actual_bboxes = [] # Initialize to ensure it's defined
+                main_cluster_info_log = {} # Initialize for logging
+
+                if not scored_clusters: # Should not happen if clusters_of_bboxes_list was not empty
+                    if self.debug: print("Crop: ERROR - scored_clusters is empty. Defaulting to largest raw cluster by len.")
+                    if clusters_of_bboxes_list: # Ensure clusters_of_bboxes_list itself isn't empty
+                        main_cluster_actual_bboxes = max(clusters_of_bboxes_list, key=len)
+                        crop_debug_info['crop_decision_source'] = "main_cluster_fallback_scoring_failed_used_max_len"
+                        main_cluster_info_log = {'num_elements': len(main_cluster_actual_bboxes), 'reason': 'scoring_failed_default_max_len'}
+                    else: # This means elements_for_clustering existed, but formed no clusters, and clusters_of_bboxes_list is empty - this path should be covered by the earlier "if not clusters_of_bboxes_list:" block
+                        if self.debug: print("Crop: CRITICAL - elements_for_clustering existed, but no clusters AND scored_clusters empty. No basis for crop.")
+                        crop_debug_info['reason_for_no_crop'] = "no_clusters_formed_and_scoring_empty"
+                        return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
+                elif scored_clusters[0]['text_assoc_count'] == 0 and scored_clusters[0]['actual_components_in_cluster'] > 0:
+                    if self.debug: 
+                        print("Crop: Best cluster has >0 actual components but 0 have associated text. Falling back to largest cluster by *total element count* from all original clusters.")
+                    main_cluster_actual_bboxes = max(clusters_of_bboxes_list, key=len) 
+                    crop_debug_info['crop_decision_source'] = "main_cluster_fallback_no_text_assoc_in_best_with_components"
+                    # Ensure selected_cluster_info_for_log is robustly assigned
+                    selected_cluster_info_for_log = next((c for c in scored_clusters if c['bboxes'] == main_cluster_actual_bboxes), None) # Find the actual selected cluster
+                    if selected_cluster_info_for_log is None: # If not found (e.g. main_cluster_actual_bboxes was empty or not in scored_clusters list for some reason)
+                        selected_cluster_info_for_log = scored_clusters[0] if scored_clusters else {} # Fallback to best or empty dict
+                    
+                    main_cluster_info_log = {
+                        'num_elements': len(main_cluster_actual_bboxes),
+                        'text_assoc_count': selected_cluster_info_for_log.get('text_assoc_count', -1), # Use .get for safety
+                        'score': selected_cluster_info_for_log.get('score', (-1,-1)), 
+                        'id': selected_cluster_info_for_log.get('id', -1)
+                    }
+                else: # Normal case or best cluster has no actual components (e.g. only junctions, text_assoc_count will be 0)
+                    main_cluster_actual_bboxes = scored_clusters[0]['bboxes']
+                    selected_cluster_info = scored_clusters[0]
+                    main_cluster_info_log = {
+                        'num_elements': len(main_cluster_actual_bboxes),
+                        'text_assoc_count': selected_cluster_info['text_assoc_count'],
+                        'score': selected_cluster_info['score'],
+                        'id': selected_cluster_info['id']
+                    }
+                    crop_debug_info['crop_decision_source'] = "main_yolo_cluster_scored_by_text_assoc"
+                
+                if main_cluster_actual_bboxes: # Add example_uid if cluster is not empty
+                    main_cluster_info_log['example_uid'] = main_cluster_actual_bboxes[0].get('persistent_uid')
+                else: # Safety if somehow main_cluster_actual_bboxes ended up empty
+                    main_cluster_info_log['example_uid'] = "N/A_EMPTY_CLUSTER_SELECTED"
+                    if self.debug: print("Crop: WARNING - main_cluster_actual_bboxes is empty after selection logic.")
+                
+                crop_debug_info['main_cluster_info'] = main_cluster_info_log
+                
+                if not main_cluster_actual_bboxes: # Final safety check before min/max
+                    if self.debug: print("Crop: CRITICAL - main_cluster_actual_bboxes is EMPTY before min/max calculation. Returning originals.")
+                    crop_debug_info['reason_for_no_crop'] = "main_cluster_empty_before_min_max"
+                    return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
+
                 mc_min_x = min(b['xmin'] for b in main_cluster_actual_bboxes)
                 mc_min_y = min(b['ymin'] for b in main_cluster_actual_bboxes)
                 mc_max_x = max(b['xmax'] for b in main_cluster_actual_bboxes)
                 mc_max_y = max(b['ymax'] for b in main_cluster_actual_bboxes)
                 crop_basis_bbox = (mc_min_x, mc_min_y, mc_max_x, mc_max_y)
-                crop_debug_info['crop_decision_source'] = "main_yolo_cluster"
+                # crop_debug_info['crop_decision_source'] is set by specific branches
 
         if crop_basis_bbox is None:
             if self.debug: print("Crop: crop_basis_bbox is None after YOLO processing. No viable basis for cropping. Returning originals.")
