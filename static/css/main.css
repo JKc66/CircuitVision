@@ -596,3 +596,113 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     height: 16px;
 }
 
+/* Custom Footer Styles */
+.custom-footer {
+    padding: 1rem; /* Reduced padding */
+    text-align: center;
+    background: linear-gradient(to bottom, #ffffff, #f8f9fa);
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 0; /* Removed top margin */
+}
+
+.custom-footer-hr {
+    max-width: 100px;
+    margin: 0 auto 1.5rem; /* Reduced bottom margin */
+    border: none;
+    height: 3px;
+    background: linear-gradient(to right, transparent, #0070f3, transparent);
+    opacity: 0.5;
+}
+
+.custom-footer-h3 {
+    margin: 0 0 1.5rem; /* Reduced bottom margin */
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: #1a1a1a;
+    letter-spacing: -0.02em;
+    position: relative;
+    display: inline-block;
+}
+
+.custom-footer-h3::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 3px;
+    background-color: var(--primary-color);
+    border-radius: 2px;
+}
+
+.footer-columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+.footer-column {
+    text-align: center;
+    position: relative;
+}
+
+.footer-column a {
+    display: inline-block;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.footer-column a:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.footer-column img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .footer-columns {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    
+    .custom-footer {
+        padding: 1.5rem 1rem;
+    }
+    
+    .custom-footer-h3 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Add hover effects for social links */
+.footer-column a[href*="linkedin"] {
+    border-color: #0077B5;
+}
+
+.footer-column a[href*="github"] {
+    border-color: #181717;
+}
+
+.footer-column a:hover[href*="linkedin"] {
+    background-color: rgba(0, 119, 181, 0.05);
+}
+
+.footer-column a:hover[href*="github"] {
+    background-color: rgba(24, 23, 23, 0.05);
+}
+

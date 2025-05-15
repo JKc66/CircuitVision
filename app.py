@@ -780,3 +780,29 @@ if st.session_state.active_results['original_image'] is not None:
     elif st.session_state.active_results.get('netlist_text') is not None:
         st.markdown("## ⚡ SPICE Analysis")
         st.info("Please click 'Get Final Netlist' above to enable SPICE analysis and component value detection.")
+
+# Add footer here
+footer_html = """
+<div class='custom-footer'>
+  <hr class='custom-footer-hr'>
+  <h3 class='custom-footer-h3'>Connect with Us</h3>
+  <div class='footer-columns'>
+    <div class='footer-column'>
+      <a href='https://www.linkedin.com/in/mah-sam/' target='_blank' rel='noopener noreferrer'>
+        <img src='https://img.shields.io/badge/LinkedIn-Mahmoud%20Sameh-0077B5?style=for-the-badge&logo=linkedin&logoColor=white' alt='Mahmoud Sameh LinkedIn'>
+      </a>
+    </div>
+    <div class='footer-column'>
+      <a href='https://www.linkedin.com/in/jawadk-c66/' target='_blank' rel='noopener noreferrer'>
+        <img src='https://img.shields.io/badge/LinkedIn-Jawad%20K-0077B5?style=for-the-badge&logo=linkedin&logoColor=white' alt='Jawad K LinkedIn'>
+      </a>
+    </div>
+    <div class='footer-column'>
+      <a href='https://github.com/JKc66/CircuitVision' target='_blank' rel='noopener noreferrer'>
+        <img src='https://img.shields.io/badge/GitHub-CircuitVision-181717?style=for-the-badge&logo=github&logoColor=white' alt='CircuitVision GitHub'>
+      </a>
+    </div>
+  </div>
+</div>
+"""
+st.markdown(footer_html, unsafe_allow_html=True)
