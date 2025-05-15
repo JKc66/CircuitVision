@@ -477,34 +477,31 @@ class CircuitAnalyzer():
     
     def enumerate_components(self, image, bboxes = None, excluded_labels=None):
         # Read the image using a helper function
-        image = image.copy()
+        image_for_enumeration = image.copy() # Work on a copy
         if excluded_labels is None:
             excluded_labels = self.non_components
 
         # Get the image dimensions
-        image_height, image_width = image.shape[:2]
+        image_height, image_width = image_for_enumeration.shape[:2]
+        # Convert image to grayscale for background intensity checking - IF it's not already grayscale
+        if len(image_for_enumeration.shape) == 3 and image_for_enumeration.shape[2] == 3:
+            gray_image = cv2.cvtColor(image_for_enumeration, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_image = image_for_enumeration.copy() # Assume it's already grayscale if not 3-channel
+
 
         # Calculate a relative font scale based on the image height
-        font_scale = max(0.5, image_height / 500.0)
-        thickness = int(max(1, image_height / 400.0))
+        font_scale = max(0.4, image_height / 900.0) # Further reduced divisor for smaller font, min lowered
+        thickness = int(max(1, image_height / 600.0)) # Further reduced divisor for thinner font
 
         bbox_counter = 0
         font = cv2.FONT_HERSHEY_SIMPLEX
-        color = (0, 0, 255)  # Red color for the text
-        
-        if bboxes is None: # E711: Comparison to `None` should be `cond is None`
-            bboxes = self.bboxes(image)
-            bboxes = non_max_suppression_by_area(bboxes, iou_threshold=0.6)
+        text_color_cv = (0, 0, 255)  # Red color for the text in BGR for OpenCV
 
-        # List to store bounding boxes of components that represent text or other objects
-        text_bboxes = []
-
-        # Convert image to grayscale for background intensity checking
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        def calculate_overlap_area(box1, box2):
-            x1_min, y1_min, x1_max, y1_max = box1
-            x2_min, y2_min, x2_max, y2_max = box2
+        # Helper: Calculate overlap area between two rectangles (xmin, ymin, xmax, ymax)
+        def calculate_overlap_area(box1_coords, box2_coords):
+            x1_min, y1_min, x1_max, y1_max = box1_coords
+            x2_min, y2_min, x2_max, y2_max = box2_coords
 
             inter_xmin = max(x1_min, x2_min)
             inter_ymin = max(y1_min, y2_min)
@@ -513,162 +510,298 @@ class CircuitAnalyzer():
 
             inter_width = max(0, inter_xmax - inter_xmin)
             inter_height = max(0, inter_ymax - inter_ymin)
-
             return inter_width * inter_height
 
-        def calculate_background_score(x, y, width, height):
-            """Calculate how suitable the background is for text placement.
-            Returns a score where higher values mean better placement."""
-            if (y < 0 or x < 0 or 
-                y + height > image_height or 
-                x + width > image_width):
+        # Helper: Calculate background suitability
+        def calculate_background_score_for_text(x_coord, y_coord, text_w, text_h):
+            # Ensure the coordinates for region extraction are valid integers
+            y_start, y_end = int(round(y_coord)), int(round(y_coord + text_h))
+            x_start, x_end = int(round(x_coord)), int(round(x_coord + text_w))
+
+            if (y_start < 0 or x_start < 0 or
+                y_end > image_height or
+                x_end > image_width):
+                return float('-inf') # Heavily penalize out-of-bounds
+
+            region = gray_image[y_start:y_end, x_start:x_end]
+            
+            if region.size == 0: # Should not happen if in bounds and text_w/h > 0
                 return float('-inf')
             
-            # Extract the region where text would be placed
-            region = gray_image[y:y + height, x:x + width]
+            # --- REMOVED SCORING BASED ON MEAN/STD --- 
+            # Old logic: 
+            # mean_intensity = np.mean(region)
+            # std_intensity = np.std(region)
+            # return mean_intensity - std_intensity * 0.5
+            # --- END REMOVED SCORING --- 
             
-            # Calculate mean intensity of the region
-            mean_intensity = np.mean(region)
-            
-            # Calculate standard deviation of intensity (for contrast)
-            std_intensity = np.std(region)
-            
-            # Prefer lighter backgrounds (higher intensity) with less variation
-            # Higher score means better placement
-            return mean_intensity - std_intensity * 0.5
+            # New logic: Simply return a constant positive score if the region is valid for placement.
+            # This means all valid regions will be treated equally by the sorting key that used to use this score.
+            # The first geometrically valid position found will effectively be chosen.
+            return 1.0 # Constant positive score for any valid patch
 
-        def total_overlap_for_position(x, y, w, h, text_bboxes):
-            total_overlap = 0
-            for text_bbox in text_bboxes:
-                overlap_area = calculate_overlap_area((x, y, x + w, y + h), text_bbox)
-                total_overlap += overlap_area
-            return total_overlap
+        # Helper function to check if two bounding boxes are "close" or overlapping
+        def are_bboxes_proximal(bbox1_dict_or_tuple, bbox2_dict_or_tuple, proximity_threshold=30):
+            if isinstance(bbox1_dict_or_tuple, dict):
+                xmin1, ymin1, xmax1, ymax1 = bbox1_dict_or_tuple['xmin'], bbox1_dict_or_tuple['ymin'], bbox1_dict_or_tuple['xmax'], bbox1_dict_or_tuple['ymax']
+            else: # tuple
+                xmin1, ymin1, xmax1, ymax1 = bbox1_dict_or_tuple
 
-        def find_optimal_position(xmin, ymin, xmax, ymax, text_width, text_height):
-            # Define candidate positions around the bounding box
-            positions = []
-            
-            # Center positions
-            positions.extend([
-                (xmin + (xmax - xmin) // 2 - text_width // 2, ymin - text_height - 5),  # Above center
-                (xmin + (xmax - xmin) // 2 - text_width // 2, ymax + 5),                # Below center
-                (xmin - text_width - 5, ymin + (ymax - ymin) // 2 - text_height // 2),  # Left center
-                (xmax + 5, ymin + (ymax - ymin) // 2 - text_height // 2)               # Right center
-            ])
-            
-            # Corner positions
-            positions.extend([
-                (xmin - text_width - 5, ymin - text_height - 5),  # Top left
-                (xmax + 5, ymin - text_height - 5),               # Top right
-                (xmin - text_width - 5, ymax + 5),                # Bottom left
-                (xmax + 5, ymax + 5)                             # Bottom right
-            ])
-            
-            # Inside positions (if bounding box is large enough)
-            if (xmax - xmin) > text_width * 1.2 and (ymax - ymin) > text_height * 1.2:
-                positions.extend([
-                    (xmin + 5, ymin + 5),                        # Inside top left
-                    (xmax - text_width - 5, ymin + 5),           # Inside top right
-                    (xmin + 5, ymax - text_height - 5),          # Inside bottom left
-                    (xmax - text_width - 5, ymax - text_height - 5)  # Inside bottom right
-                ])
+            if isinstance(bbox2_dict_or_tuple, dict):
+                xmin2, ymin2, xmax2, ymax2 = bbox2_dict_or_tuple['xmin'], bbox2_dict_or_tuple['ymin'], bbox2_dict_or_tuple['xmax'], bbox2_dict_or_tuple['ymax']
+            else: # tuple
+                xmin2, ymin2, xmax2, ymax2 = bbox2_dict_or_tuple
 
-            # Add additional positions in a grid pattern around the bounding box
-            grid_step = max(text_height, text_width)
-            for dx in range(-grid_step*2, grid_step*2 + 1, grid_step):
-                for dy in range(-grid_step*2, grid_step*2 + 1, grid_step):
-                    positions.append((
-                        xmin + (xmax - xmin) // 2 - text_width // 2 + dx,
-                        ymin + (ymax - ymin) // 2 - text_height // 2 + dy
-                    ))
+            # Check for direct overlap first
+            if not (xmax1 < xmin2 or xmin1 > xmax2 or ymax1 < ymin2 or ymin1 > ymax2):
+                return True # They overlap
 
-            best_pos = None
-            best_score = float('-inf')
+            # Check proximity (distance between closest edges)
+            # Horizontal distance
+            if xmax1 < xmin2: # bbox1 is to the left of bbox2
+                h_dist = xmin2 - xmax1
+            elif xmin1 > xmax2: # bbox1 is to the right of bbox2
+                h_dist = xmin1 - xmax2
+            else: # Overlap or aligned vertically
+                h_dist = 0
             
-            # Try all positions and find the optimal one considering both overlap and background
-            for pos_x, pos_y in positions:
-                # Check if position keeps text within image bounds
-                if (0 <= pos_x <= image_width - text_width and 
-                    0 <= pos_y <= image_height - text_height):
-                    
-                    # Calculate background score
-                    bg_score = calculate_background_score(pos_x, pos_y, text_width, text_height)
-                    
-                    # Calculate overlap penalty (negative because we want to minimize overlap)
-                    overlap_penalty = -total_overlap_for_position(
-                        pos_x, pos_y, text_width, text_height, text_bboxes
-                    ) * 0.001  # Scale factor to balance with background score
-                    
-                    # Combined score (higher is better)
-                    total_score = bg_score + overlap_penalty
-                    
-                    if total_score > best_score:
-                        best_score = total_score
-                        best_pos = (pos_x, pos_y)
+            # Vertical distance
+            if ymax1 < ymin2: # bbox1 is above bbox2
+                v_dist = ymin2 - ymax1
+            elif ymin1 > ymax2: # bbox1 is below bbox2
+                v_dist = ymin1 - ymax2
+            else: # Overlap or aligned horizontally
+                v_dist = 0
+
+            # If one dimension overlaps, we only care about the distance in the other dimension
+            if h_dist == 0: # Aligned or overlapping horizontally
+                return v_dist <= proximity_threshold
+            if v_dist == 0: # Aligned or overlapping vertically
+                return h_dist <= proximity_threshold
             
-            # If no valid position found, force it inside the bounding box at the lightest spot
-            if best_pos is None:
-                fallback_positions = [
-                    (min(max(xmin, 0), image_width - text_width),
-                     min(max(ymin, 0), image_height - text_height)),
-                    (min(xmin + (xmax - xmin) // 2 - text_width // 2, image_width - text_width),
-                     min(ymin + (ymax - ymin) // 2 - text_height // 2, image_height - text_height))
-                ]
+            # If separated in both dimensions, check diagonal distance (approximate)
+            # More accurate would be distance between closest corners/edges, but this is simpler
+            # and direct edge distance check is more robust for rectangular proximity.
+            # For now, if direct edge distances are too large, consider them not proximal enough.
+            return h_dist <= proximity_threshold and v_dist <= proximity_threshold
+
+        # New find_optimal_position logic
+        def find_optimal_position(
+            component_to_label_bbox_dict,
+            all_other_comp_bboxes_list_dicts,
+            static_text_elements_schematic_bboxes_tuples, # list of (xmin,ymin,xmax,ymax)
+            already_drawn_numbers_bboxes_tuples, # list of (xmin,ymin,xmax,ymax)
+            txt_w, txt_h
+        ):
+            comp_xmin = component_to_label_bbox_dict['xmin']
+            comp_ymin = component_to_label_bbox_dict['ymin']
+            comp_xmax = component_to_label_bbox_dict['xmax']
+            comp_ymax = component_to_label_bbox_dict['ymax']
+            comp_rect_for_check = (comp_xmin, comp_ymin, comp_xmax, comp_ymax)
+
+            comp_xc = comp_xmin + (comp_xmax - comp_xmin) // 2
+            comp_yc = comp_ymin + (comp_ymax - comp_ymin) // 2
+            
+            text_half_w, text_half_h = txt_w // 2, txt_h // 2
+            placement_padding = 5 # Reverted to 5 for a bit more space
+
+            candidate_positions_with_names = {
+                # Order can influence ties if distances are identical, but primary sort is distance
+                "right_middle": (comp_xmax + placement_padding, comp_yc - text_half_h),
+                "left_middle": (comp_xmin - txt_w - placement_padding, comp_yc - text_half_h),
+                "top_center": (comp_xc - text_half_w, comp_ymin - txt_h - placement_padding),
+                "bottom_center": (comp_xc - text_half_w, comp_ymax + placement_padding),
+                "top_right_corner_out": (comp_xmax + placement_padding, comp_ymin - txt_h), 
+                "top_left_corner_out": (comp_xmin - txt_w - placement_padding, comp_ymin - txt_h),
+                "bottom_right_corner_out": (comp_xmax + placement_padding, comp_ymax),
+                "bottom_left_corner_out": (comp_xmin - txt_w - placement_padding, comp_ymax),
+            }
+            
+            permissible_positions = []
+
+            for pos_name, (pos_x, pos_y) in candidate_positions_with_names.items():
+                pos_x_int, pos_y_int = int(round(pos_x)), int(round(pos_y))
+                current_text_rect = (pos_x_int, pos_y_int, pos_x_int + txt_w, pos_y_int + txt_h)
+
+                if not (0 <= pos_x_int < image_width - txt_w and 0 <= pos_y_int < image_height - txt_h):
+                    if self.debug: print(f"Pos {pos_name} invalid: Out of bounds for UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                    continue
+
+                if calculate_overlap_area(current_text_rect, comp_rect_for_check) > 0:
+                    if self.debug: print(f"Pos {pos_name} invalid: Overlaps its own component UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                    continue
                 
-                best_fallback_score = float('-inf')
-                for pos_x, pos_y in fallback_positions:
-                    score = calculate_background_score(pos_x, pos_y, text_width, text_height)
-                    if score > best_fallback_score:
-                        best_fallback_score = score
-                        best_pos = (pos_x, pos_y)
-            
-            return best_pos
-        
-        bbox_ids = []
-        # Loop through the bounding boxes
-        for bbox in bboxes:
-            c = bbox['class']
-            if excluded_labels and c in excluded_labels:
-                text_bboxes.append((bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']))
-                continue
+                overlaps_other_component = False
+                for other_comp_bbox_dict in all_other_comp_bboxes_list_dicts:
+                    other_comp_rect = (other_comp_bbox_dict['xmin'], other_comp_bbox_dict['ymin'], other_comp_bbox_dict['xmax'], other_comp_bbox_dict['ymax'])
+                    if calculate_overlap_area(current_text_rect, other_comp_rect) > 0:
+                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps OTHER component UID {other_comp_bbox_dict.get('persistent_uid')} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        overlaps_other_component = True
+                        break
+                if overlaps_other_component:
+                    continue
 
-            xmin, ymin = int(bbox['xmin']), int(bbox['ymin'])
-            xmax, ymax = int(bbox['xmax']), int(bbox['ymax'])
+                overlaps_static_text = False
+                for static_text_rect in static_text_elements_schematic_bboxes_tuples:
+                    if calculate_overlap_area(current_text_rect, static_text_rect) > 0:
+                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps static text element at {static_text_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        overlaps_static_text = True
+                        break
+                if overlaps_static_text:
+                    continue
+
+                overlaps_drawn_number = False
+                for drawn_num_rect in already_drawn_numbers_bboxes_tuples:
+                    if calculate_overlap_area(current_text_rect, drawn_num_rect) > 0:
+                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps already drawn number at {drawn_num_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        overlaps_drawn_number = True
+                        break
+                if overlaps_drawn_number:
+                    continue
+                
+                # bg_score is now just a check for validity (1.0) vs invalidity (-inf)
+                bg_score_check = calculate_background_score_for_text(pos_x_int, pos_y_int, txt_w, txt_h)
+                if bg_score_check > float('-inf'):
+                    # Calculate distance from component center to text center
+                    text_center_x = pos_x_int + txt_w // 2
+                    text_center_y = pos_y_int + txt_h // 2
+                    distance = np.sqrt((comp_xc - text_center_x)**2 + (comp_yc - text_center_y)**2)
+                    permissible_positions.append({
+                        'x': pos_x_int, 
+                        'y': pos_y_int, 
+                        'name': pos_name,
+                        'distance': distance # Store distance for sorting
+                    })
+                elif self.debug:
+                     print(f"Pos {pos_name} for UID {component_to_label_bbox_dict.get('persistent_uid')} had bad bg_score/invalid patch, rect: {current_text_rect}")
+
+            if not permissible_positions:
+                if self.debug: print(f"No permissible adjacent external position found for component UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                return None 
+
+            # Sort permissible positions by distance (ascending - closest first)
+            permissible_positions.sort(key=lambda p: p['distance'])
+            
+            best_pos = permissible_positions[0] # Choose the closest one
+            if self.debug: 
+                print(f"Best position for UID {component_to_label_bbox_dict.get('persistent_uid')} is {best_pos['name']} ({best_pos['x']},{best_pos['y']}) with distance {best_pos['distance']:.2f}")
+            return best_pos['x'], best_pos['y']
+
+        # Prepare lists for find_optimal_position
+        all_input_bboxes_dicts = []
+        if bboxes is None: 
+            all_input_bboxes_dicts = self.bboxes(image_for_enumeration) 
+            all_input_bboxes_dicts = non_max_suppression_by_area(all_input_bboxes_dicts, iou_threshold=0.6)
+        else:
+            all_input_bboxes_dicts = deepcopy(bboxes) 
+
+        static_text_elements_bboxes_tuples = [] # Store as tuples (xmin,ymin,xmax,ymax)
+        component_bboxes_for_enumeration_dicts = [] # Store as list of dicts
+
+        for bbox_item_dict in all_input_bboxes_dicts:
+            if excluded_labels and bbox_item_dict['class'] in excluded_labels:
+                static_text_elements_bboxes_tuples.append(
+                    (bbox_item_dict['xmin'], bbox_item_dict['ymin'], bbox_item_dict['xmax'], bbox_item_dict['ymax'])
+                )
+            else:
+                component_bboxes_for_enumeration_dicts.append(bbox_item_dict)
+        
+        output_bbox_ids_with_visual_enum = []
+        drawn_numbers_actual_bboxes_tuples = [] 
+
+        for current_component_bbox_dict in component_bboxes_for_enumeration_dicts:
+            current_comp_uid_debug = current_component_bbox_dict.get('persistent_uid', "UID_UNKNOWN")
+
+            # --- Conditional Numbering Logic --- 
+            has_nearby_text = False
+            for text_bbox_tuple in static_text_elements_bboxes_tuples:
+                if are_bboxes_proximal(current_component_bbox_dict, text_bbox_tuple, proximity_threshold=35):
+                    has_nearby_text = True
+                    if self.debug:
+                        print(f"Debug EnumSkip: Component UID {current_comp_uid_debug} HAS nearby text: {text_bbox_tuple}. Will be numbered.")
+                    break # Found a nearby text, no need to check further for this component
+            
+            if not has_nearby_text:
+                if self.debug:
+                    print(f"Debug EnumSkip: Component UID {current_comp_uid_debug} has NO nearby text. SKIPPING numbering.")
+                # Add to output_bbox_ids_with_visual_enum WITHOUT an 'id' if we still want to track it later, 
+                # or just continue to completely ignore it for enumeration.
+                # For now, let's just skip it from being numbered and added to the list that VLM uses.
+                output_bbox_ids_with_visual_enum.append(deepcopy(current_component_bbox_dict)) # Add it but it won't have an 'id' from bbox_counter
+                continue # Skip numbering this component
+            # --- End Conditional Numbering Logic ---
 
             bbox_counter += 1
+            text_to_draw = f"{bbox_counter}"
+            (current_text_width, current_text_height), _ = cv2.getTextSize(text_to_draw, font, font_scale, thickness)
             
-            # Get text size
-            text_size = cv2.getTextSize(f"{bbox_counter}", font, font_scale, thickness)[0]
-            text_width, text_height = text_size
+            other_component_bboxes_for_check_dicts = [
+                b_dict for b_dict in component_bboxes_for_enumeration_dicts
+                if b_dict.get('persistent_uid', f"{b_dict['class']}_{b_dict['xmin']}_{b_dict['ymin']}") != current_component_bbox_dict.get('persistent_uid', f"{current_component_bbox_dict['class']}_{current_component_bbox_dict['xmin']}_{current_component_bbox_dict['ymin']}")
+            ]
+            
+            optimal_pos_xy_tuple = find_optimal_position(
+                current_component_bbox_dict,
+                other_component_bboxes_for_check_dicts,
+                static_text_elements_bboxes_tuples,
+                drawn_numbers_actual_bboxes_tuples,
+                current_text_width, current_text_height
+            )
+            
+            final_pos_x, final_pos_y = -1, -1
 
-            # Find optimal position for the text
-            pos_x, pos_y = find_optimal_position(xmin, ymin, xmax, ymax, text_width, text_height)
+            if optimal_pos_xy_tuple:
+                final_pos_x, final_pos_y = optimal_pos_xy_tuple
+            else:
+                # Fallback: Place slightly above and to the right of the component's top-left corner
+                comp_xmin_val = current_component_bbox_dict['xmin']
+                comp_ymin_val = current_component_bbox_dict['ymin']
+                
+                fallback_x = comp_xmin_val + 3 # Small offset to the right
+                fallback_y = comp_ymin_val - current_text_height - 3 # Small offset above
+                
+                final_pos_x = max(0, min(fallback_x, image_width - current_text_width))
+                final_pos_y = max(0, min(fallback_y, image_height - current_text_height))
+
+                # Ensure fallback doesn't overlap with its own component if possible (simple check)
+                fallback_text_rect = (final_pos_x, final_pos_y, final_pos_x + current_text_width, final_pos_y + current_text_height)
+                comp_rect = (current_component_bbox_dict['xmin'], current_component_bbox_dict['ymin'], current_component_bbox_dict['xmax'], current_component_bbox_dict['ymax'])
+                if calculate_overlap_area(fallback_text_rect, comp_rect) > 0:
+                    # If simple fallback overlaps, try just top-left of image as last resort
+                    final_pos_x = 5 
+                    final_pos_y = 5 + (bbox_counter -1) * (current_text_height + 2) # Cascade if many fallbacks
+                    final_pos_x = max(0, min(final_pos_x, image_width - current_text_width))
+                    final_pos_y = max(0, min(final_pos_y, image_height - current_text_height))
+
+
+                if self.debug:
+                    print(f"UID {current_comp_uid_debug}: Using fallback position ({final_pos_x},{final_pos_y})")
+
+            draw_y_coord = final_pos_y + current_text_height
             
-            # Add text height to y-position since OpenCV draws text above the y-coordinate
-            pos_y += text_height
+            cv2.putText(image_for_enumeration, text_to_draw, (final_pos_x, draw_y_coord), font,
+                       font_scale, (255, 255, 255), thickness + 2, cv2.LINE_AA)
+            cv2.putText(image_for_enumeration, text_to_draw, (final_pos_x, draw_y_coord), font,
+                       font_scale, text_color_cv, thickness, cv2.LINE_AA)
             
-            # Draw the text with a white outline for better visibility on any background
-            # Draw outline
-            cv2.putText(image, f"{bbox_counter}", (pos_x, pos_y), font, 
-                       font_scale, (255, 255, 255), thickness + 2)
-            # Draw main text
-            cv2.putText(image, f"{bbox_counter}", (pos_x, pos_y), font, 
-                       font_scale, color, thickness)
-            bbox_id = deepcopy(bbox)
-            bbox_id['id'] = bbox_counter
-            bbox_ids.append(bbox_id)
+            drawn_numbers_actual_bboxes_tuples.append((final_pos_x, final_pos_y, final_pos_x + current_text_width, final_pos_y + current_text_height))
             
-        # Convert image from BGR to RGB for displaying with Matplotlib
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+            component_with_visual_id = deepcopy(current_component_bbox_dict)
+            component_with_visual_id['id'] = bbox_counter 
+            output_bbox_ids_with_visual_enum.append(component_with_visual_id)
+            
         if self.debug:
-            plt.figure(figsize=(10, 10))
-            plt.imshow(image_rgb)
+            debug_display_img = image_for_enumeration
+            if len(image_for_enumeration.shape) == 3 and image_for_enumeration.shape[2] == 3:
+                 debug_display_img = cv2.cvtColor(image_for_enumeration, cv2.COLOR_BGR2RGB)
+            
+            plt.figure(figsize=(12, 12)) 
+            plt.imshow(debug_display_img)
+            plt.title(f"Enumerated Components (New Logic) - {len(output_bbox_ids_with_visual_enum)} items numbered")
             plt.axis("off")
             plt.show()
             
-        return image, bbox_ids
-
+        return image_for_enumeration, output_bbox_ids_with_visual_enum
 
     def resize_image_keep_aspect(self, image, bboxes, new_height=600):
         """
@@ -791,79 +924,191 @@ class CircuitAnalyzer():
         plt.show()
         return img
     
-    
-    def crop_image_and_adjust_bboxes(self, image_to_crop, bboxes_to_adjust, crop_defining_bbox, padding=20): # Default padding changed to 20
+    def _are_bboxes_proximal_for_clustering(self, bbox1_dict_or_tuple, bbox2_dict_or_tuple, proximity_threshold=50):
         """
-        Crops an image based on a defining bounding box and adjusts other bounding boxes.
-        Preserves persistent_uid on adjusted bboxes.
+        Checks if two bounding boxes are proximal for clustering purposes.
+        Similar to are_bboxes_proximal in enumerate_components but used for crop clustering.
+        """
+        if isinstance(bbox1_dict_or_tuple, dict):
+            xmin1, ymin1, xmax1, ymax1 = bbox1_dict_or_tuple['xmin'], bbox1_dict_or_tuple['ymin'], bbox1_dict_or_tuple['xmax'], bbox1_dict_or_tuple['ymax']
+        else: # tuple
+            xmin1, ymin1, xmax1, ymax1 = bbox1_dict_or_tuple
+
+        if isinstance(bbox2_dict_or_tuple, dict):
+            xmin2, ymin2, xmax2, ymax2 = bbox2_dict_or_tuple['xmin'], bbox2_dict_or_tuple['ymin'], bbox2_dict_or_tuple['xmax'], bbox2_dict_or_tuple['ymax']
+        else: # tuple
+            xmin2, ymin2, xmax2, ymax2 = bbox2_dict_or_tuple
+
+        # Check for direct overlap first
+        if not (xmax1 < xmin2 or xmin1 > xmax2 or ymax1 < ymin2 or ymin1 > ymax2):
+            return True # They overlap
+
+        # Check proximity (distance between closest edges)
+        # Horizontal distance
+        if xmax1 < xmin2: # bbox1 is to the left of bbox2
+            h_dist = xmin2 - xmax1
+        elif xmin1 > xmax2: # bbox1 is to the right of bbox2
+            h_dist = xmin1 - xmax2
+        else: # Overlap or aligned vertically
+            h_dist = 0
+        
+        # Vertical distance
+        if ymax1 < ymin2: # bbox1 is above bbox2
+            v_dist = ymin2 - ymax1
+        elif ymin1 > ymax2: # bbox1 is below bbox2
+            v_dist = ymin1 - ymax2
+        else: # Overlap or aligned horizontally
+            v_dist = 0
+        
+        return h_dist <= proximity_threshold and v_dist <= proximity_threshold
+
+    def crop_image_and_adjust_bboxes(self, image_to_crop, all_yolo_bboxes_input, padding=20):
+        """
+        Crops an image based on a defining bounding box (derived from YOLO component clusters)
+        and adjusts other bounding boxes. Preserves persistent_uid on adjusted bboxes.
 
         Args:
             image_to_crop (np.ndarray): The original image to be cropped.
-            bboxes_to_adjust (List[Dict]): List of bboxes (e.g., from YOLO) in original image coordinates.
-            crop_defining_bbox (Tuple[int,int,int,int] | None): Bbox (xmin, ymin, xmax, ymax) defining the crop area.
-                                                        If None, returns originals.
-            padding (int): Padding around crop_defining_bbox.
+            all_yolo_bboxes_input (List[Dict]): List of all YOLO bboxes in original image coordinates.
+            padding (int): Padding around the determined crop basis bbox.
 
         Returns:
             Tuple[np.ndarray, List[Dict], Dict | None]:
-                - Cropped image (or original if no crop_defining_bbox or invalid crop).
+                - Cropped image (or original if no crop is performed).
                 - New list of adjusted bboxes (or original if no crop).
-                - crop_debug_info (Dict): A dictionary containing detailed information about the crop operation, 
-                                          or None if no crop_defining_bbox was provided.
+                - crop_debug_info (Dict): A dictionary containing detailed information about the crop operation.
         """
+        original_height, original_width = image_to_crop.shape[:2]
         crop_debug_info = {
             'crop_applied': False,
             'reason_for_no_crop': None,
-            'original_image_dims': image_to_crop.shape[:2][::-1], # (width, height)
-            'sam_extent_bbox': None, # Changed from defining_bbox
-            'encompassing_bbox_before_padding': None, # New field
+            'original_image_dims': (original_width, original_height),
+            # 'input_sam_extent_bbox': sam_extent_bbox, # SAM extent no longer directly used for decision here
+            'num_total_yolo_bboxes': len(all_yolo_bboxes_input),
+            'num_component_type_bboxes': 0,
+            'num_text_type_bboxes': 0,
+            'clustering_proximity_threshold': None,
+            'num_clusters_found': None,
+            'main_cluster_info': None,
+            'crop_decision_source': "unknown",
+            'crop_basis_bbox_before_padding': None,
             'padding_value': padding,
-            'window_after_main_padding': None, # Changed from initial_calculated_window_before_text
+            'window_after_main_padding': None,
             'text_bboxes_that_expanded_crop': [],
             'final_crop_window_abs': None,
-            'cropped_image_dims': None
+            'cropped_image_dims': (original_width, original_height) # Default to original
         }
 
-        if crop_defining_bbox is None:
-            if self.debug:
-                print("Crop: No crop_defining_bbox provided. Returning originals.")
-            crop_debug_info['reason_for_no_crop'] = "no_defining_bbox"
-            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
+        # 1. Filter bboxes
+        component_type_bboxes = [
+            b for b in all_yolo_bboxes_input 
+            if b.get('class') not in self.non_components 
+        ]
+        text_type_bboxes = [b for b in all_yolo_bboxes_input if b.get('class') == 'text']
+        crop_debug_info['num_component_type_bboxes'] = len(component_type_bboxes)
+        crop_debug_info['num_text_type_bboxes'] = len(text_type_bboxes)
 
-        original_height, original_width = image_to_crop.shape[:2]
+        crop_basis_bbox = None # This will be (xmin, ymin, xmax, ymax) tuple
+
+        if not component_type_bboxes:
+            if self.debug: print("Crop: No component-type YOLO bboxes found. No basis for YOLO-only crop.")
+            crop_debug_info['reason_for_no_crop'] = "no_component_bboxes_for_yolo_crop"
+            crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_yolo_components"
+            return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
+        else:
+            # Build adjacency list for component_type_bboxes
+            adj = {i: [] for i in range(len(component_type_bboxes))}
+            
+            # Dynamic proximity threshold for clustering
+            # Calculate average component size for a more adaptive threshold
+            if component_type_bboxes:
+                avg_w = sum(b['xmax'] - b['xmin'] for b in component_type_bboxes) / len(component_type_bboxes)
+                avg_h = sum(b['ymax'] - b['ymin'] for b in component_type_bboxes) / len(component_type_bboxes)
+                avg_diag = np.sqrt(avg_w**2 + avg_h**2)
+                clustering_prox_threshold = max(int(avg_diag * 2.5), 40) # 2.5x avg diagonal, min 40px
+                if self.debug:
+                    print(f"Crop: Avg component w: {avg_w:.2f}, h: {avg_h:.2f}, diag: {avg_diag:.2f}")
+                    print(f"Crop: Calculated adaptive clustering_prox_threshold: {clustering_prox_threshold}px")
+            else:
+                # Fallback if somehow component_type_bboxes is empty here, though outer check should prevent
+                clustering_prox_threshold = 75 # Default fixed if no components to measure
+            
+            crop_debug_info['clustering_proximity_threshold'] = clustering_prox_threshold
+
+            for i in range(len(component_type_bboxes)):
+                for j in range(i + 1, len(component_type_bboxes)):
+                    if self._are_bboxes_proximal_for_clustering(component_type_bboxes[i], component_type_bboxes[j], proximity_threshold=clustering_prox_threshold):
+                        adj[i].append(j)
+                        adj[j].append(i)
+
+            # Find connected components (DFS)
+            visited_indices = [False] * len(component_type_bboxes)
+            clusters_of_bboxes_list = [] # List of lists of bbox dicts
+            for i in range(len(component_type_bboxes)):
+                if not visited_indices[i]:
+                    current_cluster_member_bboxes = []
+                    component_indices_in_stack = [i]
+                    while component_indices_in_stack:
+                        u_idx = component_indices_in_stack.pop()
+                        if not visited_indices[u_idx]:
+                            visited_indices[u_idx] = True
+                            current_cluster_member_bboxes.append(component_type_bboxes[u_idx])
+                            # Iterate over neighbors from adjacency list
+                            for v_neighbor_idx in adj[u_idx]:
+                                if not visited_indices[v_neighbor_idx]:
+                                    component_indices_in_stack.append(v_neighbor_idx)
+                    if current_cluster_member_bboxes:
+                        clusters_of_bboxes_list.append(current_cluster_member_bboxes)
+            
+            crop_debug_info['num_clusters_found'] = len(clusters_of_bboxes_list)
+
+            if not clusters_of_bboxes_list:
+                if self.debug: print("Crop: Component bboxes found, but no clusters formed (all isolated). Using union of all components.")
+                min_x = min(b['xmin'] for b in component_type_bboxes)
+                min_y = min(b['ymin'] for b in component_type_bboxes)
+                max_x = max(b['xmax'] for b in component_type_bboxes)
+                max_y = max(b['ymax'] for b in component_type_bboxes)
+                crop_basis_bbox = (min_x, min_y, max_x, max_y)
+                crop_debug_info['crop_decision_source'] = "union_of_isolated_yolo_components"
+                crop_debug_info['main_cluster_info'] = "all_isolated_used_union"
+            else:
+                # Identify main cluster (largest by number of bboxes)
+                main_cluster_actual_bboxes = max(clusters_of_bboxes_list, key=len)
+                crop_debug_info['main_cluster_info'] = {
+                    'num_bboxes': len(main_cluster_actual_bboxes),
+                    'example_uid': main_cluster_actual_bboxes[0].get('persistent_uid') if main_cluster_actual_bboxes else "N/A"
+                }
+                
+                mc_min_x = min(b['xmin'] for b in main_cluster_actual_bboxes)
+                mc_min_y = min(b['ymin'] for b in main_cluster_actual_bboxes)
+                mc_max_x = max(b['xmax'] for b in main_cluster_actual_bboxes)
+                mc_max_y = max(b['ymax'] for b in main_cluster_actual_bboxes)
+                crop_basis_bbox = (mc_min_x, mc_min_y, mc_max_x, mc_max_y)
+                crop_debug_info['crop_decision_source'] = "main_yolo_cluster"
+
+        if crop_basis_bbox is None:
+            if self.debug: print("Crop: crop_basis_bbox is None after YOLO processing. No viable basis for cropping. Returning originals.")
+            crop_debug_info['reason_for_no_crop'] = "no_viable_yolo_crop_basis_found"
+            return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
+
+        crop_debug_info['crop_basis_bbox_before_padding'] = crop_basis_bbox
         
-        # Initial sam_xmin, etc. are from SAM extent (crop_defining_bbox)
-        sam_xmin, sam_ymin, sam_xmax, sam_ymax = crop_defining_bbox
-        crop_debug_info['sam_extent_bbox'] = (sam_xmin, sam_ymin, sam_xmax, sam_ymax)
+        # Use crop_basis_bbox as the defining extent for padding and text inclusion
+        def_xmin, def_ymin, def_xmax, def_ymax = crop_basis_bbox
 
-        # NEW: Calculate the union of SAM extent and all YOLO bboxes
-        effective_xmin, effective_ymin = float(sam_xmin), float(sam_ymin)
-        effective_xmax, effective_ymax = float(sam_xmax), float(sam_ymax)
-
-        for bbox in bboxes_to_adjust:
-            effective_xmin = min(effective_xmin, float(bbox['xmin']))
-            effective_ymin = min(effective_ymin, float(bbox['ymin']))
-            effective_xmax = max(effective_xmax, float(bbox['xmax']))
-            effective_ymax = max(effective_ymax, float(bbox['ymax']))
-        
-        # Now, def_xmin, etc. for the rest of the function should use these effective values
-        def_xmin, def_ymin, def_xmax, def_ymax = effective_xmin, effective_ymin, effective_xmax, effective_ymax
-        crop_debug_info['encompassing_bbox_before_padding'] = (int(round(def_xmin)), int(round(def_ymin)), int(round(def_xmax)), int(round(def_ymax)))
-
-        # Early exit if the new encompassing_bbox is already very large
+        # Early exit if the crop_basis_bbox is already very large
         original_area = float(original_height * original_width)
-        encompassing_bbox_width = float(max(0, def_xmax - def_xmin))
-        encompassing_bbox_height = float(max(0, def_ymax - def_ymin))
-        encompassing_bbox_area = encompassing_bbox_width * encompassing_bbox_height
+        basis_bbox_width = float(max(0, def_xmax - def_xmin))
+        basis_bbox_height = float(max(0, def_ymax - def_ymin))
+        basis_bbox_area = basis_bbox_width * basis_bbox_height
 
-        if original_area > 0 and (encompassing_bbox_area / original_area) > 0.90: # Threshold increased to 0.90
+        if original_area > 0 and (basis_bbox_area / original_area) > 0.90:
             if self.debug:
-                print(f"Crop: Encompassing bbox area ({encompassing_bbox_area:.0f}) is > 90% of original image area ({original_area:.0f}). Skipping crop.")
-            crop_debug_info['reason_for_no_crop'] = "encompassing_bbox_too_large" # Updated reason
-            crop_debug_info['cropped_image_dims'] = crop_debug_info['original_image_dims'] # No change
-            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
+                print(f"Crop: Crop basis bbox area ({basis_bbox_area:.0f}) is > 90% of original image area ({original_area:.0f}). Skipping crop.")
+            crop_debug_info['reason_for_no_crop'] = "crop_basis_bbox_too_large"
+            return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
 
-        # Initial crop window calculation based on the NEW encompassing def_xmin, etc. and padding
+        # Initial crop window calculation based on crop_basis_bbox and padding
         current_crop_xmin = float(max(0, def_xmin - padding))
         current_crop_ymin = float(max(0, def_ymin - padding))
         current_crop_xmax = float(min(original_width, def_xmax + padding))
@@ -871,39 +1116,49 @@ class CircuitAnalyzer():
         crop_debug_info['window_after_main_padding'] = (int(round(current_crop_xmin)), int(round(current_crop_ymin)), int(round(current_crop_xmax)), int(round(current_crop_ymax)))
         
         if self.debug:
-            print(f"Crop: Window after encompassing union and main padding: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
+            print(f"Crop: Window after crop_basis_bbox and main padding: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
 
         # Expand crop window to ensure sufficient padding for 'text' boxes
-        text_inclusion_padding = 20 # Increased from 15
+        text_inclusion_padding = 20 
 
-        for bbox_original in bboxes_to_adjust:
-            if bbox_original.get('class') == 'text':
-                text_xmin, text_ymin, text_xmax, text_ymax = float(bbox_original['xmin']), float(bbox_original['ymin']), float(bbox_original['xmax']), float(bbox_original['ymax'])
-                
-                # Removed overlaps_interest_area check. All text boxes will attempt to apply their padding.
-                expanded_xmin = min(current_crop_xmin, max(0, text_xmin - text_inclusion_padding))
-                expanded_ymin = min(current_crop_ymin, max(0, text_ymin - text_inclusion_padding))
-                expanded_xmax = max(current_crop_xmax, min(original_width, text_xmax + text_inclusion_padding))
-                expanded_ymax = max(current_crop_ymax, min(original_height, text_ymax + text_inclusion_padding))
+        for text_bbox_item in text_type_bboxes: # Iterate over actual text bboxes
+            text_xmin, text_ymin, text_xmax, text_ymax = float(text_bbox_item['xmin']), float(text_bbox_item['ymin']), float(text_bbox_item['xmax']), float(text_bbox_item['ymax'])
+            
+            # Check if the text box is reasonably close to the current crop window before expanding for it.
+            # This prevents distant text boxes from massively expanding the crop.
+            # For example, check if text_bbox_item overlaps or is near current_crop_xmin,ymin,xmax,ymax
+            # A simple check: if text box is entirely outside a slightly expanded version of current crop window, ignore it.
+            expanded_check_padding = 50 # Check against a slightly larger current window
+            if not (text_xmax < current_crop_xmin - expanded_check_padding or \
+                    text_xmin > current_crop_xmax + expanded_check_padding or \
+                    text_ymax < current_crop_ymin - expanded_check_padding or \
+                    text_ymin > current_crop_ymax + expanded_check_padding):
 
-                # Check if this text box actually caused an expansion
-                did_expand = (expanded_xmin != current_crop_xmin or 
-                              expanded_ymin != current_crop_ymin or 
-                              expanded_xmax != current_crop_xmax or 
-                              expanded_ymax != current_crop_ymax)
+                expanded_xmin_for_text = min(current_crop_xmin, max(0, text_xmin - text_inclusion_padding))
+                expanded_ymin_for_text = min(current_crop_ymin, max(0, text_ymin - text_inclusion_padding))
+                expanded_xmax_for_text = max(current_crop_xmax, min(original_width, text_xmax + text_inclusion_padding))
+                expanded_ymax_for_text = max(current_crop_ymax, min(original_height, text_ymax + text_inclusion_padding))
 
-                current_crop_xmin, current_crop_ymin, current_crop_xmax, current_crop_ymax = expanded_xmin, expanded_ymin, expanded_xmax, expanded_ymax
+                did_expand = (expanded_xmin_for_text != current_crop_xmin or 
+                              expanded_ymin_for_text != current_crop_ymin or 
+                              expanded_xmax_for_text != current_crop_xmax or 
+                              expanded_ymax_for_text != current_crop_ymax)
+
+                current_crop_xmin, current_crop_ymin, current_crop_xmax, current_crop_ymax = expanded_xmin_for_text, expanded_ymin_for_text, expanded_xmax_for_text, expanded_ymax_for_text
                 
                 if did_expand:
                     if self.debug:
-                        print(f"Crop: Text box UID {bbox_original.get('persistent_uid')} at ({text_xmin:.0f},{text_ymin:.0f})-({text_xmax:.0f},{text_ymax:.0f}) ensured text_inclusion_padding.")
+                        print(f"Crop: Text box UID {text_bbox_item.get('persistent_uid')} at ({text_xmin:.0f},{text_ymin:.0f})-({text_xmax:.0f},{text_ymax:.0f}) ensured text_inclusion_padding.")
                         print(f"Crop: Updated crop window for text padding: x({current_crop_xmin:.0f}-{current_crop_xmax:.0f}), y({current_crop_ymin:.0f}-{current_crop_ymax:.0f})")
                     crop_debug_info['text_bboxes_that_expanded_crop'].append({
-                        'uid': bbox_original.get('persistent_uid'),
-                        'class': bbox_original.get('class'),
-                        'coords_original': (bbox_original['xmin'], bbox_original['ymin'], bbox_original['xmax'], bbox_original['ymax']),
-                        'coords_text_box_abs': (text_xmin, text_ymin, text_xmax, text_ymax) # these are absolute to original image
+                        'uid': text_bbox_item.get('persistent_uid'),
+                        'class': text_bbox_item.get('class'),
+                        'coords_original': (text_bbox_item['xmin'], text_bbox_item['ymin'], text_bbox_item['xmax'], text_bbox_item['ymax']),
+                        'coords_text_box_abs': (text_xmin, text_ymin, text_xmax, text_ymax)
                     })
+            elif self.debug:
+                print(f"Crop: Text box UID {text_bbox_item.get('persistent_uid')} was too far, not used for expansion.")
+
 
         # Finalize crop coordinates as integers, ensuring they remain within image boundaries
         crop_abs_xmin = max(0, int(round(current_crop_xmin)))
@@ -914,52 +1169,68 @@ class CircuitAnalyzer():
 
         if self.debug:
             print(f"Crop: Original image dims: {original_width}x{original_height}")
-            print(f"Crop: Defining bbox for crop (SAM extent): {sam_xmin, sam_ymin, sam_xmax, sam_ymax}")
+            print(f"Crop: Crop_basis_bbox (e.g. from YOLO cluster): {crop_basis_bbox}")
             print(f"Crop: Final calculated absolute crop window (xmin,ymin,xmax,ymax): {crop_abs_xmin}, {crop_abs_ymin}, {crop_abs_xmax}, {crop_abs_ymax}")
 
         if crop_abs_xmin >= crop_abs_xmax or crop_abs_ymin >= crop_abs_ymax:
             if self.debug:
-                print("Crop: Invalid crop region. Returning originals.")
+                print("Crop: Invalid crop region after all calculations. Returning originals.")
             crop_debug_info['reason_for_no_crop'] = "invalid_region_after_expansion"
-            crop_debug_info['cropped_image_dims'] = crop_debug_info['original_image_dims'] # No change
-            # Crop was attempted but resulted in an invalid region, still return originals but with debug info
-            return image_to_crop, [deepcopy(b) for b in bboxes_to_adjust], crop_debug_info
+            return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
 
         cropped_image = image_to_crop[crop_abs_ymin:crop_abs_ymax, crop_abs_xmin:crop_abs_xmax]
-        new_height, new_width = cropped_image.shape[:2]
-        crop_debug_info['cropped_image_dims'] = (new_width, new_height)
+        new_height_cr, new_width_cr = cropped_image.shape[:2] # Renamed to avoid conflict
+        crop_debug_info['cropped_image_dims'] = (new_width_cr, new_height_cr)
         crop_debug_info['crop_applied'] = True
 
         if self.debug:
             print(f"Crop: Cropped image shape: {cropped_image.shape}")
 
         adjusted_bboxes = []
-        for bbox_original in bboxes_to_adjust:
-            adj_bbox = deepcopy(bbox_original) # Carries over persistent_uid
+        for bbox_original in all_yolo_bboxes_input: # Adjust all original bboxes
+            adj_bbox = deepcopy(bbox_original) 
             adj_bbox['xmin'] = bbox_original['xmin'] - crop_abs_xmin
             adj_bbox['ymin'] = bbox_original['ymin'] - crop_abs_ymin
             adj_bbox['xmax'] = bbox_original['xmax'] - crop_abs_xmin
             adj_bbox['ymax'] = bbox_original['ymax'] - crop_abs_ymin
 
+            # Clip adjusted bboxes to the dimensions of the new cropped image
             adj_bbox['xmin'] = max(0, adj_bbox['xmin'])
             adj_bbox['ymin'] = max(0, adj_bbox['ymin'])
-            adj_bbox['xmax'] = min(new_width, adj_bbox['xmax'])
-            adj_bbox['ymax'] = min(new_height, adj_bbox['ymax'])
+            adj_bbox['xmax'] = min(new_width_cr, adj_bbox['xmax'])
+            adj_bbox['ymax'] = min(new_height_cr, adj_bbox['ymax'])
 
+            # Only keep bboxes that still have a positive area after adjustment and clipping
             if adj_bbox['xmax'] > adj_bbox['xmin'] and adj_bbox['ymax'] > adj_bbox['ymin']:
                 adjusted_bboxes.append(adj_bbox)
             elif self.debug:
-                print(f"Crop: Bbox for class {adj_bbox.get('class')} (UID: {adj_bbox.get('persistent_uid')}) filtered out. Orig coords: {bbox_original[ 'xmin']},{bbox_original['ymin']}. Adjusted: {adj_bbox[ 'xmin']},{adj_bbox['ymin']}")
+                print(f"Crop: Bbox for class {adj_bbox.get('class')} (UID: {adj_bbox.get('persistent_uid')}) filtered out post-crop. Orig coords: ({bbox_original['xmin']},{bbox_original['ymin']})-({bbox_original['xmax']},{bbox_original['ymax']}). Adjusted before clip: ({bbox_original['xmin'] - crop_abs_xmin},{bbox_original['ymin'] - crop_abs_ymin}). Clipped: ({adj_bbox['xmin']},{adj_bbox['ymin']})-({adj_bbox['xmax']},{adj_bbox['ymax']})")
         
         if self.debug:
-            print(f"Crop: Original bbox count: {len(bboxes_to_adjust)}, Adjusted bbox count: {len(adjusted_bboxes)}")
+            print(f"Crop: Original bbox count: {len(all_yolo_bboxes_input)}, Adjusted bbox count: {len(adjusted_bboxes)}")
         
-        # Ensure final return is the crop_debug_info dictionary
         return cropped_image, adjusted_bboxes, crop_debug_info
 
     def get_node_connections(self, _image_for_context, processing_wire_mask, bboxes_relative_to_mask):
         if self.debug:
-            print(f"Node Connections: Received processing_wire_mask shape: {processing_wire_mask.shape}, {len(bboxes_relative_to_mask)} bboxes.")
+            print(f"Node Connections: Received processing_wire_mask shape: {processing_wire_mask.shape if processing_wire_mask is not None else 'None'}, {len(bboxes_relative_to_mask)} bboxes.")
+
+        # Graceful exit if processing_wire_mask is None (e.g., SAM2 disabled or failed)
+        if processing_wire_mask is None:
+            if self.debug:
+                print("Node Connections: processing_wire_mask is None. Cannot perform node analysis. Returning empty results.")
+            # Return structures matching expected output, but empty/default where appropriate
+            # The visualization images would typically be based on the input image or a default size if mask is None.
+            # For simplicity, we can return None for image outputs or a small blank image if a placeholder is strictly needed.
+            
+            # Fallback image for visualizations if processing_wire_mask was expected for dimensions
+            fallback_viz_height, fallback_viz_width = (100,100) # Small default
+            if _image_for_context is not None: # If original image context is available, use its dims for fallback viz
+                fallback_viz_height, fallback_viz_width = _image_for_context.shape[:2]
+
+            blank_image_fallback = np.zeros((fallback_viz_height, fallback_viz_width, 3), dtype=np.uint8)
+            
+            return [], blank_image_fallback, blank_image_fallback, blank_image_fallback, blank_image_fallback, blank_image_fallback
 
         # --- Mask Preparation (Input `processing_wire_mask` is already the cropped SAM2 mask) ---
         emptied_mask = processing_wire_mask.copy()
@@ -991,11 +1262,42 @@ class CircuitAnalyzer():
             # For logging, let's explicitly state what happens to 'terminal'
             
             # MODIFIED: Removed 'terminal' from the list of components to preserve locally
-            components_to_preserve_locally = ('crossover', 'junction', 'circuit', 'vss') 
+            # Check: self.non_components includes 'junction', 'crossover', 'vss', 'circuit'. 
+            # 'terminal' is NOT in self.non_components.
+            # The goal is to zero out component bodies to leave only wires for contour finding.
+            # If a component is a 'terminal' (a connection point, not a source), its area might be small
+            # and part of the wire path.
+            # The critical part is that large components (like sources, R, L, C) are zeroed out.
+            # Small junctions, true terminals (if classified as such and small) should ideally be preserved if they
+            # form part of the conductive path structure.
+            # The current `components_to_preserve_locally` only has `('crossover', 'junction', 'circuit', 'vss')`.
+            # This means 'terminal' (if it's not in self.non_components) *would* be zeroed out by the `else`
+            # if `bbox_comp['class'] not in components_to_preserve_locally` evaluates to true.
+            # Let's refine this based on `self.non_components` vs actual components.
+            # We want to preserve "connection-like" elements and wires, and remove "component-body-like" elements.
+
+            # If bbox_comp['class'] is an actual component (e.g. resistor, capacitor, voltage.dc)
+            # AND not one of the special pass-throughs like 'junction', 'crossover', 'vss', then zero it.
+            # 'terminal' is tricky. If it refers to a large source body (e.g. reclassified from terminal to voltage.dc),
+            # then `bbox_comp['class']` would be `voltage.dc`, and it would be zeroed.
+            # If `bbox_comp['class']` is still `terminal` (meaning it was a YOLO 'terminal' and was NOT reclassified),
+            # then it might be a small dot.
+            # The `self.non_components` set is: {'text', 'junction', 'crossover', 'vss', 'explanatory', 'circuit'}
+            # Actual components are things NOT in `self.non_components`.
+
+            # Revised logic for zeroing out:
+            # Zero out if it's an "actual component" (not in non_components)
+            # UNLESS it's a special case we want to keep for wire structure (e.g. tiny terminals if they were part of wires)
+            # For now, the existing `components_to_preserve_locally` seems to handle specific preservations.
+            # If a 'terminal' (original YOLO classification) is *not* in `components_to_preserve_locally`, it gets zeroed.
+            # This is likely the desired behavior to remove the body of a source that might still be called 'terminal'
+            # if reclassification didn't catch it but LLaMA/VLM will.
             
-            if bbox_comp['class'] not in components_to_preserve_locally:
+            components_to_preserve_locally_in_mask = ('crossover', 'junction', 'circuit', 'vss') 
+            
+            if bbox_comp['class'] not in components_to_preserve_locally_in_mask:
                 if self.debug and is_problematic_terminal_current_bbox:
-                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) is NOT in components_to_preserve_locally. Will be ZEROED OUT by this loop.")
+                    print(f"NodeConnLog: Problematic terminal UID {problematic_terminal_uid} (class: {bbox_comp['class']}) is NOT in components_to_preserve_locally_in_mask. Will be ZEROED OUT by this loop.")
                 
                 ymin, ymax = max(0, int(bbox_comp['ymin'])), min(current_height, int(bbox_comp['ymax']))
                 xmin, xmax = max(0, int(bbox_comp['xmin'])), min(current_width, int(bbox_comp['xmax']))

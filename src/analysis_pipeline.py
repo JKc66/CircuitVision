@@ -156,69 +156,63 @@ def run_initial_detection_and_enrichment(current_analyzer, active_results, detai
     return active_results.get('bboxes_orig_coords_nms') # Return the (potentially reclassified and LLaMA-enriched) bboxes
 
 def run_segmentation_and_cropping(current_analyzer, active_results, detailed_timings_dict, app_logger):
-    """Performs SAM2 segmentation, determines extent, and crops the image and masks."""
-    step_start_time_sam = time.time()
-    full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = None, None, None
+    """Performs YOLO-based cropping first, then SAM2 segmentation on the (potentially) cropped image."""
     original_image = active_results['original_image']
-    bboxes_orig_coords_nms = active_results.get('bboxes_orig_coords_nms', [])
+    # bboxes_orig_coords_nms are the YOLO detections on the original image, potentially LLaMA-enriched
+    bboxes_from_initial_detection = active_results.get('bboxes_orig_coords_nms', [])
 
-    if original_image is not None and current_analyzer.use_sam2:
-        app_logger.debug("Step 1B: Performing SAM2 segmentation on original image...")
-        full_binary_sam_mask, sam2_colored_display_output, sam_extent_bbox = current_analyzer.segment_with_sam2(
-            original_image
-        )
-        active_results['sam2_output'] = sam2_colored_display_output # For display
-        if sam_extent_bbox:
-            app_logger.info(f"SAM2 extent bbox found: {sam_extent_bbox}")
-        else:
-            app_logger.warning("SAM2 did not return a valid extent bbox. Cropping will be skipped.")
-    elif not current_analyzer.use_sam2:
-        app_logger.warning("SAM2 is disabled. Cropping based on SAM2 extent will be skipped.")
-    detailed_timings_dict['SAM2 Segmentation & Extent'] = time.time() - step_start_time_sam
+    # --- Step 1: YOLO-based Cropping ---
+    step_start_time_yolo_crop = time.time()
+    app_logger.debug("Attempting YOLO-based cropping...")
+    image_after_yolo_crop, bboxes_after_yolo_crop, crop_debug_info = current_analyzer.crop_image_and_adjust_bboxes(
+        original_image,
+        deepcopy(bboxes_from_initial_detection), # Pass a copy to avoid modifying the original list if crop_image_and_adjust_bboxes does so
+        padding=80 # Keep existing padding or adjust as needed
+    )
+    active_results['crop_debug_info'] = crop_debug_info
+    detailed_timings_dict['YOLO-based Image Cropping'] = time.time() - step_start_time_yolo_crop
 
-    # Step 1C: Crop based on SAM2 Extent
-    step_start_time_crop = time.time()
-    image_for_analysis = original_image # Default
-    bboxes_for_analysis = bboxes_orig_coords_nms # Default
-    cropped_sam_mask_for_nodes = full_binary_sam_mask # Default to full if no crop
-    active_results['crop_debug_info'] = None # Initialize
-
-    if sam_extent_bbox and full_binary_sam_mask is not None:
-        app_logger.debug("Attempting to crop image and SAM2 mask based on SAM2 extent...")
-        cropped_visual_image, adjusted_yolo_bboxes, crop_debug_info = current_analyzer.crop_image_and_adjust_bboxes(
-            original_image,
-            bboxes_orig_coords_nms,
-            sam_extent_bbox,
-            padding=80 
-        )
-        active_results['crop_debug_info'] = crop_debug_info
-
-        if crop_debug_info and crop_debug_info.get('crop_applied'):
-            image_for_analysis = cropped_visual_image
-            bboxes_for_analysis = adjusted_yolo_bboxes
-            final_crop_coords = crop_debug_info.get('final_crop_window_abs')
-            if final_crop_coords and full_binary_sam_mask is not None:
-                crop_x, crop_y, crop_x_max, crop_y_max = final_crop_coords
-                cropped_sam_mask_for_nodes = full_binary_sam_mask[crop_y:crop_y_max, crop_x:crop_x_max]
-                app_logger.info(f"Visual image and SAM2 mask cropped. Cropped SAM mask shape: {cropped_sam_mask_for_nodes.shape}")
-            elif full_binary_sam_mask is None:
-                 app_logger.warning("Full binary SAM mask is None, cannot crop it.")
-            else:
-                app_logger.warning("Final crop window coordinates not found. Cannot crop SAM mask.")
-                cropped_sam_mask_for_nodes = full_binary_sam_mask 
-        elif crop_debug_info:
-            app_logger.info(f"Cropping was not applied. Reason: {crop_debug_info.get('reason_for_no_crop', 'Unknown')}. Using originals.")
-        else:
-            app_logger.warning("crop_debug_info was None or malformed. Using originals.")
+    if crop_debug_info and crop_debug_info.get('crop_applied'):
+        app_logger.info(f"YOLO-based crop applied. New image dimensions: {image_after_yolo_crop.shape[:2]}")
+        # The image_for_analysis will be this cropped version
+        # bboxes_for_analysis will be bboxes_after_yolo_crop
     else:
-        app_logger.info("Skipping crop: SAM2 extent bbox or full mask not available.")
+        app_logger.info(f"YOLO-based crop NOT applied. Reason: {crop_debug_info.get('reason_for_no_crop', 'Unknown')}. Using original image dimensions.")
+        # image_after_yolo_crop is original_image, bboxes_after_yolo_crop are bboxes_from_initial_detection
     
-    active_results['image_for_analysis'] = image_for_analysis
-    active_results['bboxes'] = bboxes_for_analysis 
-    active_results['cropped_sam_mask_for_nodes'] = cropped_sam_mask_for_nodes
-    detailed_timings_dict['Image Cropping'] = time.time() - step_start_time_crop
+    # Update active_results with the image and bboxes that will be used for further analysis
+    active_results['image_for_analysis'] = image_after_yolo_crop
+    active_results['bboxes'] = bboxes_after_yolo_crop # These are adjusted to image_after_yolo_crop
 
-    return image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes
+    # --- Step 2: SAM2 Segmentation (on the potentially YOLO-cropped image) ---
+    step_start_time_sam = time.time()
+    binary_sam_mask_on_yolo_cropped_img = None
+    sam2_colored_display_output = None
+
+    if current_analyzer.use_sam2:
+        app_logger.debug("Step 2B: Performing SAM2 segmentation on the (potentially YOLO-cropped) image_for_analysis...")
+        # SAM2 expects BGR, but CircuitAnalyzer.segment_with_sam2 handles conversion if it receives RGB
+        # image_after_yolo_crop is RGB, which is fine for segment_with_sam2
+        binary_sam_mask_on_yolo_cropped_img, sam2_colored_display_output, _ = current_analyzer.segment_with_sam2(
+            image_after_yolo_crop # Pass the (potentially) YOLO-cropped image
+        )
+        # The third return value (sam_extent_bbox from SAM2) is not critically needed here anymore for cropping decisions.
+        active_results['sam2_output'] = sam2_colored_display_output # For display, now on yolo-cropped image
+        if binary_sam_mask_on_yolo_cropped_img is not None:
+            app_logger.info(f"SAM2 segmentation successful on YOLO-cropped image. Mask shape: {binary_sam_mask_on_yolo_cropped_img.shape}")
+        else:
+            app_logger.warning("SAM2 segmentation on YOLO-cropped image did not return a binary mask.")
+    elif not current_analyzer.use_sam2:
+        app_logger.warning("SAM2 is disabled. Skipping SAM2 segmentation.")
+    
+    detailed_timings_dict['SAM2 Segmentation on YOLO-Cropped Image'] = time.time() - step_start_time_sam
+    
+    # This will be used by node analysis. It's the SAM2 mask on the image_after_yolo_crop, or None.
+    active_results['cropped_sam_mask_for_nodes'] = binary_sam_mask_on_yolo_cropped_img
+
+    # The function returns the image that all subsequent analysis should use, 
+    # the bboxes adjusted for that image, and the SAM2 mask (if any) for that image.
+    return image_after_yolo_crop, bboxes_after_yolo_crop, binary_sam_mask_on_yolo_cropped_img
 
 def run_node_analysis(current_analyzer, img_for_analysis, crpd_sam_mask_nodes, bboxes_for_analysis_nodes, active_results_dict, detailed_timings_dict, app_logger):
     """Performs node connection analysis using SAM mask and bboxes."""
