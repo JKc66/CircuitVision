@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 from PySpice.Spice.Parser import SpiceParser
 from PySpice.Unit import u_Hz
-from PySpice.Unit.Unit import UnitValue # Added for explicit type checking if safe_to_complex doesn't cover all
 from src.utils import _parse_vlm_ac_string, safe_to_complex
 
 def perform_dc_spice_analysis(current_netlist_content, app_logger):
