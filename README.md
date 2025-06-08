@@ -9,7 +9,7 @@
     <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white" />
   </a>
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
-    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision" />
+    <img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-green.svg" />
   </a>
     <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision" />
