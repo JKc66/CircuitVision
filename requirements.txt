@@ -16,3 +16,4 @@ gdown
 openai
 streamlit-image-select
 groq
+gradio
