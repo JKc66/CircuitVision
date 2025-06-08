@@ -1,7 +1,7 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align="center">
-  <img width="40%" src="static/images/CircuitVision.png" />
+  <img width="60%" src="static/images/CircuitVision.png" />
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
     <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white" />
   </a>
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
-    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license" />
+    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/JKc66/CircuitVision" />
   </a>
     <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision" />
