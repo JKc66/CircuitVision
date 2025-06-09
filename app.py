@@ -194,8 +194,8 @@ if analyzer is None:
     logger.critical("FATAL: Analyzer object is None after loading logic. Forcing stop.")
     st.stop()
 
-# logger.info("--"*60) # Original log lines, can be kept or removed
-# logger.info("--"*60)
+logger.info("--"*60) 
+logger.info("--"*60)
 
 # Create containers for results
 if 'active_results' not in st.session_state:
@@ -250,17 +250,6 @@ with file_upload_container:
         type=['png', 'jpg', 'jpeg'],
         help="For best results, use a clear image"
     )
-
-# Show SAM2 status -- THIS BLOCK IS NOW HANDLED BY THE TOAST ABOVE, CAN BE REMOVED OR COMMENTED
-# if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
-#     if not st.session_state.get('model_load_toast_shown', False):
-#         st.toast("✅ Model loaded successfully")
-#         st.session_state.model_load_toast_shown = True
-# else:
-#     # This part is tricky because if analyzer is None, app would have stopped.
-#     # If analyzer exists but use_sam2 is False, a warning is appropriate.
-#     if analyzer is not None: # Redundant given the hard stop above, but safe
-#         st.warning("⚠️ SAM2 features may be disabled or model loading was incomplete if this message persists.")
 
 # Process uploaded file
 if uploaded_file is not None:    
