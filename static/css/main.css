@@ -596,6 +596,43 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     height: 16px;
 }
 
+/* Badge for CPU info */
+.cpu-info-badge-container {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: -15px;
+    margin-bottom: 5px;
+    position: relative;
+    z-index: 10;
+}
+
+.cpu-info-badge {
+    background-color: #0D1117;
+    color: #28a745;
+    padding: 5px 12px;
+    border-radius: 15px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+}
+
+.blinking-light {
+    width: 8px;
+    height: 8px;
+    background-color: #28a745;
+    border-radius: 50%;
+    margin-right: 8px;
+    animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
 /* Custom Footer Styles */
 .custom-footer {
     padding: 1rem; /* Reduced padding */

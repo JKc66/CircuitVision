@@ -1,10 +1,12 @@
-import torch
 import streamlit as st
-import logging
 import os
+import logging
+import torch
+import multiprocessing
 import time
 import re
 from PIL import Image
+
 from src.utils import (
             create_annotated_image,
             calculate_component_stats,
@@ -238,6 +240,20 @@ if 'final_netlist_generated' not in st.session_state:
     st.session_state.final_netlist_generated = False
 if 'editable_netlist_content' not in st.session_state:
     st.session_state.editable_netlist_content = None
+
+# Get CPU info
+cpu_count = multiprocessing.cpu_count()
+
+# Display CPU info badge
+st.markdown(f"""
+<div class="cpu-info-badge-container">
+    <div class="cpu-info-badge">
+        <div class="blinking-light"></div>
+        Running on CPU ({cpu_count} cores)
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 
 # Main content  
 st.image("static/images/sdp_banner.png", use_container_width=True)
