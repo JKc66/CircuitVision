@@ -94,8 +94,8 @@ def process_new_upload(uploaded_file, upload_dir_path, app_logger):
     st.session_state.start_analysis_triggered = True
     st.session_state.analysis_in_progress = True
 
-def run_initial_detection_and_enrichment(current_analyzer, active_results, detailed_timings_dict, app_logger):
-    """Performs initial component detection (YOLO) and semantic enrichment (LLaMA)."""
+def run_initial_detection(current_analyzer, active_results, detailed_timings_dict, app_logger):
+    """Performs initial component detection (YOLO) on the original image."""
     step_start_time_yolo = time.time()
     raw_bboxes_orig_coords = []
     if active_results['original_image'] is not None:
@@ -111,38 +111,46 @@ def run_initial_detection_and_enrichment(current_analyzer, active_results, detai
         # This function is called within a try block, so an error here will be caught.
         raise ValueError("Original image not available for YOLO analysis.") 
     detailed_timings_dict['YOLO Component Detection'] = time.time() - step_start_time_yolo
+    
+    return active_results.get('bboxes_orig_coords_nms') # Return the original detections
 
-    # --- NEW STEP: Reclassify terminals based on preliminary connectivity ---
-    app_logger.info("Attempting preliminary reclassification of 'terminal' components...")
-    if 'original_image_pil' in active_results and active_results['original_image_pil'] is not None:
-        image_pil_for_reclass = active_results['original_image_pil']
-        image_rgb_for_reclass = np.array(image_pil_for_reclass.convert("RGB"))
-        current_analyzer.reclassify_terminals_based_on_connectivity(image_rgb_for_reclass, active_results['bboxes_orig_coords_nms']) # Modifies bboxes_orig_coords_nms in-place
-        app_logger.info("Preliminary reclassification of 'terminal' components completed.")
-        # active_results['bboxes_orig_coords_nms'] is now updated with reclassified classes
+def run_terminal_reclassification(current_analyzer, image_for_reclass, bboxes_to_reclassify, detailed_timings_dict, app_logger):
+    """Reclassifies 'terminal' components based on connectivity on the given image."""
+    step_start_time_reclass = time.time()
+    app_logger.info("Attempting reclassification of 'terminal' components on cropped image...")
+    
+    if image_for_reclass is not None and bboxes_to_reclassify:
+        # The reclassify function expects an RGB numpy image. The input image is likely BGR.
+        image_rgb_for_reclass = cv2.cvtColor(image_for_reclass, cv2.COLOR_BGR2RGB)
+
+        # The function modifies the list in-place
+        current_analyzer.reclassify_terminals_based_on_connectivity(image_rgb_for_reclass, bboxes_to_reclassify)
+        app_logger.info("Reclassification of 'terminal' components completed.")
+        
+        # For debugging, store the state of bboxes after this step
+        active_results = st.session_state.active_results
+        active_results['bboxes_after_reclass_before_llama'] = deepcopy(bboxes_to_reclassify)
     else:
-        app_logger.warning("Skipping terminal reclassification: 'original_image_pil' not found.")
-    # --- END MOVED BLOCK ---
+        app_logger.warning("Skipping terminal reclassification: image or bboxes not available.")
+    
+    detailed_timings_dict['Terminal Reclassification'] = time.time() - step_start_time_reclass
+    return bboxes_to_reclassify
 
-    # Store bboxes *after* reclassification but *before* LLaMA enrichment for debugging
-    # This helps see what class LLaMA will receive.
-    if active_results.get('bboxes_orig_coords_nms'):
-         active_results['bboxes_after_reclass_before_llama'] = deepcopy(active_results['bboxes_orig_coords_nms'])
-
-    # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
-    # This step now operates on bboxes that have already been through terminal reclassification
+def run_llama_enrichment(current_analyzer, image_for_enrichment, bboxes_to_enrich, detailed_timings_dict, app_logger):
+    """Enriches component bboxes with semantic directions from LLaMA on the (potentially cropped) image."""
     can_enrich = (
-        active_results.get('bboxes_orig_coords_nms') and
-        active_results.get('original_image') is not None and # original_image is numpy, used by _enrich_bboxes_with_directions
+        bboxes_to_enrich and
+        image_for_enrichment is not None and
         hasattr(current_analyzer, 'groq_client') and current_analyzer.groq_client
     )
     if can_enrich:
         app_logger.info("Attempting to enrich component bboxes with semantic directions from LLaMA...")
         step_start_time_llama_enrich = time.time()
         try:
+            # Note: _enrich_bboxes_with_directions modifies the list in-place
             current_analyzer._enrich_bboxes_with_directions(
-                active_results['original_image'],
-                active_results['bboxes_orig_coords_nms'] # This list is modified in-place
+                cv2.cvtColor(image_for_enrichment, cv2.COLOR_BGR2RGB), # Ensure image is RGB for LLaMA
+                bboxes_to_enrich      # Use the provided bboxes (likely adjusted)
             )
             app_logger.info("Semantic direction enrichment step completed.")
         except Exception as e_enrich:
@@ -150,10 +158,12 @@ def run_initial_detection_and_enrichment(current_analyzer, active_results, detai
             st.warning("Could not determine semantic directions for some components using LLaMA.")
         finally:
             detailed_timings_dict['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich
-    elif active_results.get('bboxes_orig_coords_nms') and active_results.get('original_image') is not None:
+    elif bboxes_to_enrich and image_for_enrichment is not None:
         app_logger.warning("Skipping LLaMA semantic direction enrichment: Groq client not available or other issue.")
     
-    return active_results.get('bboxes_orig_coords_nms') # Return the (potentially reclassified and LLaMA-enriched) bboxes
+    # The bboxes_to_enrich list has been modified in-place, so no explicit return needed,
+    # but returning it can make the data flow clearer in app.py.
+    return bboxes_to_enrich
 
 def run_segmentation_and_cropping(current_analyzer, active_results, detailed_timings_dict, app_logger):
     """Performs YOLO-based cropping first, then SAM2 segmentation on the (potentially) cropped image."""

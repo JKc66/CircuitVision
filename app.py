@@ -16,8 +16,10 @@ from src.utils import (
 from src.circuit_analyzer import CircuitAnalyzer
 from src.analysis_pipeline import (
     process_new_upload,
-    run_initial_detection_and_enrichment,
+    run_initial_detection,
     run_segmentation_and_cropping,
+    run_terminal_reclassification,
+    run_llama_enrichment,
     run_node_analysis,
     run_initial_netlist_generation,
     log_analysis_summary,
@@ -322,19 +324,16 @@ if st.session_state.get('start_analysis_triggered', False):
                 detailed_timings = {}
                 logger.info("Starting complete circuit analysis...")
                 
-                # Step 1: Initial Component Detection and Enrichment
-                # This step runs YOLO on the original image, reclassifies 'terminal' components,
-                # and enriches component data with semantic directions using a VLM (LLaMA).
+                # Step 1: Initial Component Detection
+                # This step runs YOLO on the original image to get a raw list of components.
                 try:
-                    bboxes_after_enrichment = run_initial_detection_and_enrichment(analyzer, st.session_state.active_results, detailed_timings, logger)
-                    if bboxes_after_enrichment is None:
-                        # Handle error case if run_initial_detection_and_enrichment indicates a critical failure
-                        # For example, if original_image was missing
-                        st.error("Error: Could not perform initial component detection.")
+                    initial_bboxes = run_initial_detection(analyzer, st.session_state.active_results, detailed_timings, logger)
+                    if initial_bboxes is None:
+                        # Handle error case if run_initial_detection indicates a critical failure
+                        st.error("Error: Could not perform initial component detection for cropping.")
                         st.session_state.analysis_in_progress = False
                         loader_placeholder.empty()
                         st.stop()
-                    # bboxes_orig_coords_nms in st.session_state.active_results is updated by this function
                 except ValueError as ve:
                     st.error(str(ve))
                     st.session_state.analysis_in_progress = False
@@ -346,7 +345,17 @@ if st.session_state.get('start_analysis_triggered', False):
                 # then runs SAM2 to segment the wires and connection paths on the (potentially) cropped image.
                 image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes = run_segmentation_and_cropping(analyzer, st.session_state.active_results, detailed_timings, logger)
 
-                # Step 3: Create Annotated Display Image
+                # Step 3: Terminal Reclassification on Cropped Image
+                # On the newly cropped image, we re-evaluate components labeled as 'terminal'.
+                # Based on their connectivity, they might be reclassified (e.g., to a voltage source).
+                run_terminal_reclassification(analyzer, image_for_analysis, bboxes_for_analysis, detailed_timings, logger)
+
+                # Step 4: LLaMA Enrichment on Cropped Image
+                # Now that we have a cropped and reclassified view, we run LLaMA analysis on the
+                # component images for better accuracy in determining semantic direction.
+                run_llama_enrichment(analyzer, image_for_analysis, bboxes_for_analysis, detailed_timings, logger)
+
+                # Step 5: Create Annotated Display Image
                 # An annotated version of the (potentially cropped) image is created for display.
                 annotated_display_image = create_annotated_image(
                     image_for_analysis, 
@@ -358,15 +367,15 @@ if st.session_state.get('start_analysis_triggered', False):
                 component_stats = calculate_component_stats(bboxes_for_analysis)
                 st.session_state.active_results['component_stats'] = component_stats
 
-                # Step 4: Node Analysis
+                # Step 6: Node Analysis
                 # This step uses the SAM2 mask and adjusted component bboxes to identify connection nodes.
                 nodes = run_node_analysis(analyzer, image_for_analysis, cropped_sam_mask_for_nodes, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
                 
-                # Step 5: Initial Netlist Generation
+                # Step 7: Initial Netlist Generation
                 # An initial netlist (without final component values) is generated from the identified nodes.
                 valueless_netlist = run_initial_netlist_generation(analyzer, nodes, image_for_analysis, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
 
-                # Log analysis summary (Moved definition earlier, called here)
+                # Log analysis summary
                 log_analysis_summary(st.session_state.active_results, logger, log_level)
                 
                 # End timing and log the duration
@@ -547,7 +556,7 @@ if st.session_state.active_results['original_image'] is not None:
                         st.session_state.active_results['original_image'],
                         st.session_state.active_results['bboxes_orig_coords_nms']
                     )
-                    st.image(initial_yolo_annotated_img, caption="Initial YOLO detections on original image before any cropping or reclassification (except NMS)", use_container_width=True)
+                    st.image(initial_yolo_annotated_img, caption="Initial YOLO detections on original image before any cropping (except NMS)", use_container_width=True)
                 else:
                     st.info("Initial YOLO detection data or original image not available in session state.")
 
@@ -683,7 +692,7 @@ if st.session_state.active_results['original_image'] is not None:
         with st.expander("🔍 Debug: VLM"):
             st.markdown("### Image Sent to VLM")
             if 'enum_img' in st.session_state.active_results and st.session_state.active_results['enum_img'] is not None:
-                st.image(st.session_state.active_results['enum_img'], caption="`Image sent for VLM Stage 2 analysis`")
+                st.image(st.session_state.active_results['enum_img'], caption="`Image sent for VLM`")
             else:
                 st.info("Enumerated image for VLM not available.")
                 
