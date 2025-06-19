@@ -13,7 +13,7 @@ def download_file(url, filename):
     """Download a file from a URL."""
     print(f"Downloading {filename}...")
     response = requests.get(url, stream=True)
-    response.raise_for_status()  # Raise error if download fails
+    response.raise_for_status()  
 
     with open(filename, 'wb') as f:
         for chunk in response.iter_content(chunk_size=8192):

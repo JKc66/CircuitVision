@@ -137,29 +137,29 @@ def run_terminal_reclassification(current_analyzer, image_for_reclass, bboxes_to
     return bboxes_to_reclassify
 
 def run_llama_enrichment(current_analyzer, image_for_enrichment, bboxes_to_enrich, detailed_timings_dict, app_logger):
-    """Enriches component bboxes with semantic directions from LLaMA on the (potentially cropped) image."""
+    """Enriches component bboxes with semantic directions from the VLM on the (potentially cropped) image."""
     can_enrich = (
         bboxes_to_enrich and
         image_for_enrichment is not None and
-        hasattr(current_analyzer, 'groq_client') and current_analyzer.groq_client
+        hasattr(current_analyzer, 'gemini_client') and current_analyzer.gemini_client
     )
     if can_enrich:
-        app_logger.info("Attempting to enrich component bboxes with semantic directions from LLaMA...")
-        step_start_time_llama_enrich = time.time()
+        app_logger.info("Attempting to enrich component bboxes with semantic directions from VLM...")
+        step_start_time_vlm_enrich = time.time()
         try:
             # Note: _enrich_bboxes_with_directions modifies the list in-place
             current_analyzer._enrich_bboxes_with_directions(
-                cv2.cvtColor(image_for_enrichment, cv2.COLOR_BGR2RGB), # Ensure image is RGB for LLaMA
+                cv2.cvtColor(image_for_enrichment, cv2.COLOR_BGR2RGB), # Ensure image is RGB for VLM
                 bboxes_to_enrich      # Use the provided bboxes (likely adjusted)
             )
             app_logger.info("Semantic direction enrichment step completed.")
         except Exception as e_enrich:
-            app_logger.error(f"Error during LLaMA semantic direction enrichment: {e_enrich}")
-            st.warning("Could not determine semantic directions for some components using LLaMA.")
+            app_logger.error(f"Error during VLM semantic direction enrichment: {e_enrich}")
+            st.warning("Could not determine semantic directions for some components using VLM.")
         finally:
-            detailed_timings_dict['LLaMA Direction Enrichment'] = time.time() - step_start_time_llama_enrich
+            detailed_timings_dict['VLM Direction Enrichment'] = time.time() - step_start_time_vlm_enrich
     elif bboxes_to_enrich and image_for_enrichment is not None:
-        app_logger.warning("Skipping LLaMA semantic direction enrichment: Groq client not available or other issue.")
+        app_logger.warning("Skipping VLM semantic direction enrichment: Gemini client not available or other issue.")
     
     # The bboxes_to_enrich list has been modified in-place, so no explicit return needed,
     # but returning it can make the data flow clearer in app.py.
@@ -276,19 +276,19 @@ def run_initial_netlist_generation(current_analyzer, identified_nodes, img_for_a
             active_results_dict['netlist_text'] = valueless_netlist_text # Initially, netlist_text is the valueless one
             st.session_state.editable_netlist_content = valueless_netlist_text # For the editor
             
-            # Generate initial netlist WITHOUT LLaMA directions for comparison
+            # Generate initial netlist WITHOUT VLM directions for comparison
             try:
-                app_logger.debug("Generating initial netlist WITHOUT LLaMA directions for comparison...")
-                nodes_copy_for_no_llama = deepcopy(identified_nodes)
-                for node_data in nodes_copy_for_no_llama:
+                app_logger.debug("Generating initial netlist WITHOUT VLM directions for comparison...")
+                nodes_copy_for_no_vlm = deepcopy(identified_nodes)
+                for node_data in nodes_copy_for_no_vlm:
                     for component_in_node in node_data.get('components', []):
                         component_in_node['semantic_direction'] = "UNKNOWN"
-                valueless_netlist_no_llama_dir = current_analyzer.generate_netlist_from_nodes(nodes_copy_for_no_llama)
-                valueless_netlist_text_no_llama_dir = '\n'.join([current_analyzer.stringify_line(line) for line in valueless_netlist_no_llama_dir])
-                active_results_dict['valueless_netlist_text_no_llama_dir'] = valueless_netlist_text_no_llama_dir
-                app_logger.debug(f"Generated initial netlist WITHOUT LLaMA directions: {len(valueless_netlist_no_llama_dir)} components")
-            except Exception as e_no_llama:
-                app_logger.error(f"Error generating netlist without LLaMA directions: {e_no_llama}")
+                valueless_netlist_no_vlm_dir = current_analyzer.generate_netlist_from_nodes(nodes_copy_for_no_vlm)
+                valueless_netlist_text_no_vlm_dir = '\n'.join([current_analyzer.stringify_line(line) for line in valueless_netlist_no_vlm_dir])
+                active_results_dict['valueless_netlist_text_no_llama_dir'] = valueless_netlist_text_no_vlm_dir
+                app_logger.debug(f"Generated initial netlist WITHOUT VLM directions: {len(valueless_netlist_no_vlm_dir)} components")
+            except Exception as e_no_vlm:
+                app_logger.error(f"Error generating netlist without VLM directions: {e_no_vlm}")
                 active_results_dict['valueless_netlist_text_no_llama_dir'] = "Error generating this version."
 
             app_logger.debug("Enumerating components for later Gemini labeling...")

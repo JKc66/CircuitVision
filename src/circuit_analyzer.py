@@ -25,9 +25,11 @@ import base64
 import io
 from PIL import Image as PILImage # Alias to avoid conflict with cv2.Image
 from dotenv import load_dotenv
-from groq import Groq
+# from groq import Groq # Commented out for Gemini switch
 import time
 import json # For parsing LLaMA JSON output
+from google import genai
+
 
 # Load environment variables
 load_dotenv()
@@ -43,7 +45,7 @@ class CircuitAnalyzer():
         self.yolo = YOLO(yolo_path)
         self.debug = debug
         if self.debug:
-            self.last_llama_input_images = {}
+            self.last_vlm_input_images = {} # Standardize to last_vlm_input_images
         self.classes = load_classes()
         self.classes_names = set(self.classes.keys())
         self.non_components = set(['text', 'junction', 'crossover', 'vss', 'explanatory', 'circuit'])
@@ -128,22 +130,21 @@ class CircuitAnalyzer():
         self.current_source_classes_names = {'current.dc', 'current.dependent'}
         # --- End component types ---
 
-        # +++ Groq Client Initialization +++
-        self.groq_client = None
-        if os.getenv("GROQ_API_KEY"):
+        # +++ Google Gemini Client Initialization +++
+        self.gemini_client = None
+        if os.getenv("GEMINI_API_KEY"):
             try:
-                self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+                # Correctly initialize the client by passing the API key
+                self.gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
                 if self.debug:
-                    print("Groq client initialized successfully.")
-                    # It makes sense to initialize last_llama_input_images here as well, 
-                    # or ensure it's initialized if debug is true, as it's related to LLaMA/Groq debugging.
-                    if not hasattr(self, 'last_llama_input_images'): # Ensure it's initialized if not already
-                        self.last_llama_input_images = {}
+                    print("Google GenAI client initialized successfully.")
+                    if not hasattr(self, 'last_vlm_input_images'):
+                        self.last_vlm_input_images = {}
             except Exception as e:
-                print(f"Failed to initialize Groq client: {e}")
+                print(f"Failed to initialize Google GenAI client: {e}")
         elif self.debug:
-            print("GROQ_API_KEY not found, semantic direction analysis via LLaMA will be disabled.")
-        # ---
+            print("GEMINI_API_KEY not found, semantic direction analysis via Gemini will be disabled.")
+        # --- End Gemini Client Initialization ---
 
         if self.use_sam2:
             try:
@@ -617,18 +618,21 @@ class CircuitAnalyzer():
                 current_text_rect = (pos_x_int, pos_y_int, pos_x_int + txt_w, pos_y_int + txt_h)
 
                 if not (0 <= pos_x_int < image_width - txt_w and 0 <= pos_y_int < image_height - txt_h):
-                    if self.debug: print(f"Pos {pos_name} invalid: Out of bounds for UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                    if self.debug: 
+                        print(f"Pos {pos_name} invalid: Out of bounds for UID {component_to_label_bbox_dict.get('persistent_uid')}")
                     continue
 
                 if calculate_overlap_area(current_text_rect, comp_rect_for_check) > 0:
-                    if self.debug: print(f"Pos {pos_name} invalid: Overlaps its own component UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                    if self.debug: 
+                        print(f"Pos {pos_name} invalid: Overlaps its own component UID {component_to_label_bbox_dict.get('persistent_uid')}")
                     continue
                 
                 overlaps_other_component = False
                 for other_comp_bbox_dict in all_other_comp_bboxes_list_dicts:
                     other_comp_rect = (other_comp_bbox_dict['xmin'], other_comp_bbox_dict['ymin'], other_comp_bbox_dict['xmax'], other_comp_bbox_dict['ymax'])
                     if calculate_overlap_area(current_text_rect, other_comp_rect) > 0:
-                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps OTHER component UID {other_comp_bbox_dict.get('persistent_uid')} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        if self.debug: 
+                            print(f"Pos {pos_name} invalid: Overlaps OTHER component UID {other_comp_bbox_dict.get('persistent_uid')} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
                         overlaps_other_component = True
                         break
                 if overlaps_other_component:
@@ -637,7 +641,8 @@ class CircuitAnalyzer():
                 overlaps_static_text = False
                 for static_text_rect in static_text_elements_schematic_bboxes_tuples:
                     if calculate_overlap_area(current_text_rect, static_text_rect) > 0:
-                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps static text element at {static_text_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        if self.debug: 
+                            print(f"Pos {pos_name} invalid: Overlaps static text element at {static_text_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
                         overlaps_static_text = True
                         break
                 if overlaps_static_text:
@@ -646,7 +651,8 @@ class CircuitAnalyzer():
                 overlaps_drawn_number = False
                 for drawn_num_rect in already_drawn_numbers_bboxes_tuples:
                     if calculate_overlap_area(current_text_rect, drawn_num_rect) > 0:
-                        if self.debug: print(f"Pos {pos_name} invalid: Overlaps already drawn number at {drawn_num_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                        if self.debug: 
+                            print(f"Pos {pos_name} invalid: Overlaps already drawn number at {drawn_num_rect} for labeling UID {component_to_label_bbox_dict.get('persistent_uid')}")
                         overlaps_drawn_number = True
                         break
                 if overlaps_drawn_number:
@@ -669,7 +675,8 @@ class CircuitAnalyzer():
                      print(f"Pos {pos_name} for UID {component_to_label_bbox_dict.get('persistent_uid')} had bad bg_score/invalid patch, rect: {current_text_rect}")
 
             if not permissible_positions:
-                if self.debug: print(f"No permissible adjacent external position found for component UID {component_to_label_bbox_dict.get('persistent_uid')}")
+                if self.debug: 
+                    print(f"No permissible adjacent external position found for component UID {component_to_label_bbox_dict.get('persistent_uid')}")
                 return None 
 
             # Sort permissible positions by distance (ascending - closest first)
@@ -982,7 +989,8 @@ class CircuitAnalyzer():
         crop_basis_bbox = None # This will be (xmin, ymin, xmax, ymax) tuple
 
         if not elements_for_clustering: # MODIFIED from component_type_bboxes
-            if self.debug: print("Crop: No elements_for_clustering (components or junctions) found. No basis for crop.") 
+            if self.debug: 
+                print("Crop: No elements_for_clustering (components or junctions) found. No basis for crop.") 
             crop_debug_info['reason_for_no_crop'] = "no_elements_for_clustering" 
             crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_clustering_elements" 
             return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
@@ -1044,7 +1052,8 @@ class CircuitAnalyzer():
             crop_debug_info['num_clusters_found'] = len(clusters_of_bboxes_list)
 
             if not clusters_of_bboxes_list:
-                if self.debug: print("Crop: Elements for clustering found, but no clusters formed. Using union of all elements.") 
+                if self.debug: 
+                    print("Crop: Elements for clustering found, but no clusters formed. Using union of all elements.") 
                 min_x = min(b['xmin'] for b in elements_for_clustering) 
                 min_y = min(b['ymin'] for b in elements_for_clustering) 
                 max_x = max(b['xmax'] for b in elements_for_clustering) 
@@ -1088,13 +1097,15 @@ class CircuitAnalyzer():
                 main_cluster_info_log = {} # Initialize for logging
 
                 if not scored_clusters: # Should not happen if clusters_of_bboxes_list was not empty
-                    if self.debug: print("Crop: ERROR - scored_clusters is empty. Defaulting to largest raw cluster by len.")
+                    if self.debug: 
+                        print("Crop: ERROR - scored_clusters is empty. Defaulting to largest raw cluster by len.")
                     if clusters_of_bboxes_list: # Ensure clusters_of_bboxes_list itself isn't empty
                         main_cluster_actual_bboxes = max(clusters_of_bboxes_list, key=len)
                         crop_debug_info['crop_decision_source'] = "main_cluster_fallback_scoring_failed_used_max_len"
                         main_cluster_info_log = {'num_elements': len(main_cluster_actual_bboxes), 'reason': 'scoring_failed_default_max_len'}
                     else: # This means elements_for_clustering existed, but formed no clusters, and clusters_of_bboxes_list is empty - this path should be covered by the earlier "if not clusters_of_bboxes_list:" block
-                        if self.debug: print("Crop: CRITICAL - elements_for_clustering existed, but no clusters AND scored_clusters empty. No basis for crop.")
+                        if self.debug: 
+                            print("Crop: CRITICAL - elements_for_clustering existed, but no clusters AND scored_clusters empty. No basis for crop.")
                         crop_debug_info['reason_for_no_crop'] = "no_clusters_formed_and_scoring_empty"
                         return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
                 elif scored_clusters[0]['text_assoc_count'] == 0 and scored_clusters[0]['actual_components_in_cluster'] > 0:
@@ -1128,12 +1139,14 @@ class CircuitAnalyzer():
                     main_cluster_info_log['example_uid'] = main_cluster_actual_bboxes[0].get('persistent_uid')
                 else: # Safety if somehow main_cluster_actual_bboxes ended up empty
                     main_cluster_info_log['example_uid'] = "N/A_EMPTY_CLUSTER_SELECTED"
-                    if self.debug: print("Crop: WARNING - main_cluster_actual_bboxes is empty after selection logic.")
+                    if self.debug: 
+                        print("Crop: WARNING - main_cluster_actual_bboxes is empty after selection logic.")
                 
                 crop_debug_info['main_cluster_info'] = main_cluster_info_log
                 
                 if not main_cluster_actual_bboxes: # Final safety check before min/max
-                    if self.debug: print("Crop: CRITICAL - main_cluster_actual_bboxes is EMPTY before min/max calculation. Returning originals.")
+                    if self.debug: 
+                        print("Crop: CRITICAL - main_cluster_actual_bboxes is EMPTY before min/max calculation. Returning originals.")
                     crop_debug_info['reason_for_no_crop'] = "main_cluster_empty_before_min_max"
                     return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
 
@@ -1145,7 +1158,8 @@ class CircuitAnalyzer():
                 # crop_debug_info['crop_decision_source'] is set by specific branches
 
         if crop_basis_bbox is None:
-            if self.debug: print("Crop: crop_basis_bbox is None after YOLO processing. No viable basis for cropping. Returning originals.")
+            if self.debug: 
+                print("Crop: crop_basis_bbox is None after YOLO processing. No viable basis for cropping. Returning originals.")
             crop_debug_info['reason_for_no_crop'] = "no_viable_yolo_crop_basis_found"
             return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
 
@@ -2019,19 +2033,19 @@ class CircuitAnalyzer():
         else:
             return primary_node_candidate1, secondary_node_candidate1 # node1 remains primary
 
-    def _get_semantic_direction_from_llama(self, component_crop_rgb, component_class_name):
+    def _get_semantic_direction_from_vlm(self, component_crop_rgb, component_class_name):
         """
-        Analyzes a component crop with LLaMA via Groq to determine its direction.
+        Analyzes a component crop with a Vision Language Model (VLM) to determine its direction.
+        Currently uses Google Gemini 2.5 Flash Lite.
         'component_class_name' is the string name like 'voltage.dc'.
         """
-        if not self.groq_client:
+        if not self.gemini_client:
             if self.debug:
-                print("Groq client not available. Skipping LLaMA direction analysis.")
+                print("Gemini client not available. Skipping VLM direction analysis.")
             return "UNKNOWN", "UNKNOWN"
 
-        base64_image = self._encode_image_for_llama(component_crop_rgb)
         prompt = None
-        model_to_use = "meta-llama/llama-4-maverick-17b-128e-instruct" 
+        model_to_use = "gemini-2.5-flash-lite-preview-06-17"
 
         if component_class_name in self.voltage_classes_names:
             prompt = """Analyze this image.
@@ -2083,112 +2097,93 @@ Example responses:
 """
         else:
             if self.debug:
-                print(f"No specific LLaMA prompt for component class: {component_class_name}. Skipping LLaMA.")
-            return "UNKNOWN", "UNKNOWN" # Not a component type we analyze for direction with LLaMA with these prompts
+                print(f"No specific VLM prompt for component class: {component_class_name}. Skipping VLM.")
+            return "UNKNOWN", "UNKNOWN"
 
         try:
             if self.debug:
-                print(f"LLaMA_QUERY_V3 ({model_to_use}) for direction of {component_class_name}...")
+                print(f"VLM_QUERY ({model_to_use}) for direction of {component_class_name}...")
             
-            llm_start_time = time.time()
-            chat_completion = self.groq_client.chat.completions.create(
+            vlm_start_time = time.time()
+            
+            # Convert numpy array to PIL Image for the new SDK
+            pil_image = PILImage.fromarray(component_crop_rgb)
+
+            response = self.gemini_client.models.generate_content(
                 model=model_to_use,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{base64_image}"}
-                            }
-                        ]
-                    }
-                ],
-                temperature=0.1, 
-                max_tokens=1024, 
-                top_p=0.98,         
-                stream=False,
-                response_format={"type": "json_object"} 
+                contents=[prompt, pil_image],
+                config={
+                    'response_mime_type': 'application/json',
+                    'temperature': 0.1,
+                    'top_p': 0.98,
+                    'max_output_tokens': 1024
+                }
             )
-            llm_time = time.time() - llm_start_time
-            response_content = chat_completion.choices[0].message.content
+            
+            vlm_time = time.time() - vlm_start_time
+            response_content = response.text
             
             if self.debug:
-                print(f"LLaMA_RESPONSE_V3 for {component_class_name} (took {llm_time:.2f}s): {response_content}")
+                print(f"VLM_RESPONSE for {component_class_name} (took {vlm_time:.2f}s): {response_content}")
             
             parsed_response = json.loads(response_content)
-            # The direction field seems to be directly the value like "UP", "DOWN" etc.
-            # Also, the prompt for voltage sources might return 'symbol_positions', 
-            # but we are primarily interested in the 'direction' field for the netlist.
-            # We will prioritize the 'direction' field if present.
             direction = parsed_response.get("direction")
-            reason = parsed_response.get("reason") # Get the reason
+            reason = parsed_response.get("reason")
 
-            if direction: # Only return reason if direction is valid
-                 return str(direction).upper(), str(reason).upper() if reason else "UNKNOWN" # Return both
+            if direction:
+                 return str(direction).upper(), str(reason).upper() if reason else "UNKNOWN"
             else:
                 if self.debug:
-                    print(f"LLaMA_RESPONSE_V3_NO_DIRECTION for {component_class_name}. Full response: {parsed_response}")
-                return "UNKNOWN", "UNKNOWN" # Fallback on error for both
+                    print(f"VLM_RESPONSE_NO_DIRECTION for {component_class_name}. Full response: {parsed_response}")
+                return "UNKNOWN", "UNKNOWN"
             
         except Exception as e:
-            if self.debug: # Added this check for consistency
-                print(f"LLaMA_ERROR_V3 for {component_class_name} direction: {e}")
-            return "UNKNOWN", "UNKNOWN" # Fallback on error for both
+            if self.debug:
+                print(f"VLM_ERROR for {component_class_name} direction: {e}")
+            return "UNKNOWN", "UNKNOWN"
 
     def _enrich_bboxes_with_directions(self, image_rgb, bboxes):
         """
-        Iterates through bboxes, and for relevant components (sources, diodes based on classes_of_interest),
-        uses LLaMA to determine semantic direction and adds it to the bbox dict.
+        Iterates through bboxes, and for relevant components (sources, diodes),
+        uses a VLM to determine semantic direction and adds it to the bbox dict.
         Modifies bboxes in-place.
-        Assumes image_rgb is the original, full image in RGB format.
-        Uses numeric class IDs and confidence threshold from code.
         """
-        if not self.groq_client:
+        if not self.gemini_client:
             if self.debug:
-                print("Groq client not initialized. Skipping semantic direction enrichment.")
+                print("Gemini client not initialized. Skipping semantic direction enrichment.")
             return
 
         for bbox in bboxes:
-            yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp') 
-            # Fallback to look up ID if _yolo_class_id_temp wasn't set (e.g. if reclassification failed to set it)
+            yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp')
             if yolo_numeric_cls_id is None:
                 string_class_name_for_id_lookup = bbox.get('class')
                 for num_id, name_str in self.yolo_class_names_map.items():
                     if name_str == string_class_name_for_id_lookup:
                         yolo_numeric_cls_id = num_id
-                        bbox['_yolo_class_id_temp'] = num_id # Also set it for consistency
+                        bbox['_yolo_class_id_temp'] = num_id
                         break
             
-            confidence = bbox.get('confidence', 0.0) # Keep confidence if needed for a threshold check later
             component_string_class_name = bbox.get('class')
 
-            # MODIFIED CONDITION: Use class attributes for selecting components for LLaMA
             if yolo_numeric_cls_id is not None and \
                yolo_numeric_cls_id in self.llama_numeric_classes_of_interest and \
                component_string_class_name is not None and \
-               component_string_class_name in self.llama_classes_of_interest_names: 
-               # Add confidence check here if desired, e.g.: and confidence >= self.llama_confidence_threshold
+               component_string_class_name in self.llama_classes_of_interest_names:
                 
-                # Crop the component from the original image
                 orig_xmin, orig_ymin = int(bbox['xmin']), int(bbox['ymin'])
                 orig_xmax, orig_ymax = int(bbox['xmax']), int(bbox['ymax'])
                 
-                # Define padding for the LLaMA crop
-                llama_crop_padding = 15  # Pixels
+                llama_crop_padding = 15
                 h, w = image_rgb.shape[:2]
 
-                # Apply padding and ensure coordinates are within image bounds
                 crop_xmin = max(0, orig_xmin - llama_crop_padding)
                 crop_ymin = max(0, orig_ymin - llama_crop_padding)
                 crop_xmax = min(w, orig_xmax + llama_crop_padding)
                 crop_ymax = min(h, orig_ymax + llama_crop_padding)
 
-                # Ensure crop coordinates are valid after padding
                 if crop_xmin >= crop_xmax or crop_ymin >= crop_ymax:
                     if self.debug:
-                        print(f"Skipping LLaMA for {component_string_class_name} due to invalid crop dimensions: {bbox}")
+                        print(f"Skipping VLM for {component_string_class_name} due to invalid crop dimensions: {bbox}")
                     bbox['semantic_direction'] = 'UNKNOWN'
                     bbox['semantic_reason'] = 'UNKNOWN'
                     continue
@@ -2196,32 +2191,28 @@ Example responses:
                 component_crop_rgb = image_rgb[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
                 
                 if self.debug and bbox.get('persistent_uid'):
-                    # Store a copy of the image that will be/was sent to LLaMA
-                    self.last_llama_input_images[bbox['persistent_uid']] = component_crop_rgb.copy()
+                    self.last_vlm_input_images[bbox['persistent_uid']] = component_crop_rgb.copy()
 
                 if component_crop_rgb.size == 0:
                     if self.debug:
-                        print(f"Skipping LLaMA for {component_string_class_name} due to empty crop: {bbox.get('persistent_uid')}")
-                    bbox['semantic_direction'] = 'UNKNOWN' # Explicitly string UNKNOWN
+                        print(f"Skipping VLM for {component_string_class_name} due to empty crop: {bbox.get('persistent_uid')}")
+                    bbox['semantic_direction'] = 'UNKNOWN'
                     bbox['semantic_reason'] = 'UNKNOWN'
                     continue
 
-                # Get semantic direction and reason from LLaMA
-                direction_from_llama, reason_from_llama = self._get_semantic_direction_from_llama(component_crop_rgb, component_string_class_name)
+                direction_from_vlm, reason_from_vlm = self._get_semantic_direction_from_vlm(component_crop_rgb, component_string_class_name)
                 
                 if self.debug:
-                    print(f"EnrichDebug UID {bbox.get('persistent_uid')}: LLaMA returned dir='{direction_from_llama}', reason='{reason_from_llama}'")
+                    print(f"EnrichDebug UID {bbox.get('persistent_uid')}: VLM returned dir='{direction_from_vlm}', reason='{reason_from_vlm}'")
 
-                bbox['semantic_direction'] = direction_from_llama # Directly assign what LLaMA helper returned
-                bbox['semantic_reason'] = reason_from_llama   # Directly assign
+                bbox['semantic_direction'] = direction_from_vlm
+                bbox['semantic_reason'] = reason_from_vlm
                 
                 if self.debug:
                     print(f"EnrichDebug UID {bbox.get('persistent_uid')}: Stored in bbox dir='{bbox['semantic_direction']}', reason='{bbox['semantic_reason']}'")
             else:
-                # For components not analyzed for direction, set a default or skip
                 bbox['semantic_direction'] = None
-                bbox['semantic_reason'] = None # Ensure reason is also None
-        # No explicit return, bboxes list is modified in-place.
+                bbox['semantic_reason'] = None
 
     def reclassify_terminals_based_on_connectivity(self, image_rgb_original, bboxes_list_to_modify):
         """

@@ -391,18 +391,21 @@ def get_modified_sam2(
         print("Skipping SAM2ImageWrapper.")
 
     # 4. Final Verification of Trainable Parameters
-    print("\n--- Final Trainable Parameters ---")
+    # print("\n--- Final Trainable Parameters ---") # Commented out to reduce log verbosity
     total_trainable = 0
+    # prefix_to_remove = "sam2_model.base_model.model."
     for name, param in final_model.named_parameters():
         if param.requires_grad:
-            print(f"- {name}: {param.shape} ({param.numel()})")
+            # display_name = name
+            # if display_name.startswith(prefix_to_remove):
+            #     display_name = display_name[len(prefix_to_remove):]
+            
+            # print(f"- {display_name}: {param.shape} ({param.numel()})") # Commented out to reduce log verbosity
             total_trainable += param.numel()
-    print(f"Total Trainable Parameters in Final Model: {total_trainable}")
+    # print(f"Total Trainable Parameters in Final Model: {total_trainable}") # Commented out to reduce log verbosity
     if total_trainable == 0 and (use_peft or use_wrapper):
          print("WARNING: No trainable parameters found! Check PEFT config and wrapper parameter initialization.")
-    elif not use_peft and not use_wrapper and total_trainable > 0:
-         print("Warning: Model has trainable parameters but PEFT/Wrapper were not used?")
-
-    print("--- Modified SAM2 Structure Ready ---")
+    
+    print("\n--- Modified SAM2 Structure Ready ---")
     return final_model
 
