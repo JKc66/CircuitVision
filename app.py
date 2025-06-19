@@ -422,12 +422,45 @@ if st.session_state.active_results['original_image'] is not None:
         expander_label = f"⏱️ Analysis Time: {st.session_state.active_results['elapsed_time']:.2f}s (Expand for step details)"
         st.markdown("<div class='detailed-timings-expander'>", unsafe_allow_html=True)
         with st.expander(expander_label):
-            detailed_timings = st.session_state.active_results['detailed_timings']
+            detailed_timings = st.session_state.active_results.get('detailed_timings')
             if detailed_timings:
-                table_data = ["| Step | Duration (s) |", "| :--- | :----------- |"]
+                # Find min and max durations for color scaling
+                durations = list(detailed_timings.values())
+                min_duration = min(durations) if durations else 0
+                max_duration = max(durations) if durations else 1
+
+                def get_color_for_duration(duration, min_d, max_d):
+                    """Calculates an HSL color from green to red based on duration."""
+                    if max_d == min_d:
+                        normalized = 0.5
+                    else:
+                        normalized = (duration - min_d) / (max_d - min_d)
+                    
+                    # Hue for green is 120, hue for red is 0.
+                    # We invert normalized value so 0 is green and 1 is red.
+                    hue = 120 * (1 - normalized)
+                    hue = max(0, min(hue, 120)) # Clamp hue
+                    
+                    # Use pastel-like saturation and lightness
+                    return f"hsl({hue}, 70%, 85%)"
+
+                # Build an HTML table with inline styles for row colors
+                table_html = """
+                <style>
+                    .timing-table { width: 100%; border-collapse: collapse; }
+                    .timing-table th, .timing-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+                    .timing-table th { background-color: #f2f2f2; }
+                </style>
+                <table class='timing-table'>
+                    <tr><th>Step</th><th>Duration (s)</th></tr>
+                """
+                
                 for step, duration in detailed_timings.items():
-                    table_data.append(f"| {step} | {duration:.2f} |")
-                st.markdown("\n".join(table_data), unsafe_allow_html=True)
+                    row_color = get_color_for_duration(duration, min_duration, max_duration)
+                    table_html += f'<tr style="background-color: {row_color};"><td>{step}</td><td>{duration:.2f}</td></tr>'
+                
+                table_html += "</table>"
+                st.markdown(table_html, unsafe_allow_html=True)
             else:
                 st.info("No detailed timing information available.")
         st.markdown("</div>", unsafe_allow_html=True)
