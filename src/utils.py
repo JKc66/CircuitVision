@@ -203,7 +203,7 @@ def gemini_labels_openrouter(image_file):
         base_url="https://openrouter.ai/api/v1",
         api_key=openrouter_api_key,
         default_headers={
-            "HTTP-Referer": "https://app.jawadk.me/circuits/",
+            "HTTP-Referer": "https://app.jawadk.me/CircuitVisions/",
             "X-Title": "Circuit Analyzer"
         }
     )

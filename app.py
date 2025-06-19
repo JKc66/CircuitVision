@@ -322,9 +322,9 @@ if st.session_state.get('start_analysis_triggered', False):
                 detailed_timings = {}
                 logger.info("Starting complete circuit analysis...")
                 
-                # # Step 1A: Initial Component Detection (YOLO on original image)
-                # # Step 1AA: Enrich BBoxes with Semantic Directions from LLaMA (Groq)
-                # The two steps above are now combined into run_initial_detection_and_enrichment
+                # Step 1: Initial Component Detection and Enrichment
+                # This step runs YOLO on the original image, reclassifies 'terminal' components,
+                # and enriches component data with semantic directions using a VLM (LLaMA).
                 try:
                     bboxes_after_enrichment = run_initial_detection_and_enrichment(analyzer, st.session_state.active_results, detailed_timings, logger)
                     if bboxes_after_enrichment is None:
@@ -334,41 +334,37 @@ if st.session_state.get('start_analysis_triggered', False):
                         st.session_state.analysis_in_progress = False
                         loader_placeholder.empty()
                         st.stop()
-                    # bboxes_orig_coords_nms in st.session_state.active_results is updated by the function
+                    # bboxes_orig_coords_nms in st.session_state.active_results is updated by this function
                 except ValueError as ve:
                     st.error(str(ve))
                     st.session_state.analysis_in_progress = False
                     loader_placeholder.empty()
                     st.stop()
 
-                # # Step 1B: SAM2 Segmentation (on original image) & Get SAM2 Extent
-                # # Step 1C: Crop based on SAM2 Extent
-                # These steps are now combined into run_segmentation_and_cropping
+                # Step 2: Image Cropping and Segmentation
+                # This step crops the image based on the location of detected components to focus on the circuit,
+                # then runs SAM2 to segment the wires and connection paths on the (potentially) cropped image.
                 image_for_analysis, bboxes_for_analysis, cropped_sam_mask_for_nodes = run_segmentation_and_cropping(analyzer, st.session_state.active_results, detailed_timings, logger)
 
-                # Step 1D: Create Annotated image for display (on image_for_analysis)
+                # Step 3: Create Annotated Display Image
+                # An annotated version of the (potentially cropped) image is created for display.
                 annotated_display_image = create_annotated_image(
                     image_for_analysis, 
                     bboxes_for_analysis 
                 )
                 st.session_state.active_results['annotated_image'] = annotated_display_image
                 
-                # Component Statistics from bboxes_for_analysis
+                # Calculate and store component statistics from the final set of bboxes
                 component_stats = calculate_component_stats(bboxes_for_analysis)
                 st.session_state.active_results['component_stats'] = component_stats
-                # Combined timing for what was previously just "Component Detection"
-                # This now includes YOLO, SAM2-Extent, Cropping, and Annotation for display.
-                # For a more direct comparison, sum them up or keep separate as done with detailed_timings.
 
-                # # Step 2: Node Analysis (using cropped SAM2 mask and adjusted bboxes)
-                # This step is now in run_node_analysis
+                # Step 4: Node Analysis
+                # This step uses the SAM2 mask and adjusted component bboxes to identify connection nodes.
                 nodes = run_node_analysis(analyzer, image_for_analysis, cropped_sam_mask_for_nodes, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
-                # `nodes` variable now holds the result, and st.session_state.active_results['nodes'] is also updated within the function.
-
-                # # Step 3: Generate Netlist
-                # This step is now in run_initial_netlist_generation
+                
+                # Step 5: Initial Netlist Generation
+                # An initial netlist (without final component values) is generated from the identified nodes.
                 valueless_netlist = run_initial_netlist_generation(analyzer, nodes, image_for_analysis, bboxes_for_analysis, st.session_state.active_results, detailed_timings, logger)
-                # `valueless_netlist` holds the result, and session state is updated within the function.
 
                 # Log analysis summary (Moved definition earlier, called here)
                 log_analysis_summary(st.session_state.active_results, logger, log_level)

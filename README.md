@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://app.jawadk.me/circuits/" target="_blank">
+  <a href="https://app.jawadk.me/CircuitVision/" target="_blank">
     <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white" />
   </a>
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
