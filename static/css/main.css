@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-    --primary-color: #0070f3; /* Next.js/Vercel Blue */
+    --primary-color: #0070f3; /* Next.js/ Blue */
     --primary-text-color: #ffffff;
     --secondary-button-bg: #ffffff;
     --secondary-button-text: #333333;
@@ -452,7 +452,7 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
-/* Custom File Uploader Styles (Vercel/Next.js Inspired) */
+/* Custom File Uploader Styles (/Next.js Inspired) */
 section[data-testid="stFileUploaderDropzone"] {
     display: flex; /* Arrange instructions and button in a row */
     flex-direction: row;
@@ -596,25 +596,29 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     height: 16px;
 }
 
-/* Badge for CPU info */
-.cpu-info-badge-container {
+/* Container for system badges */
+.system-badges-container {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
     margin-top: -15px;
     margin-bottom: 5px;
     position: relative;
     z-index: 10;
+    flex-wrap: wrap;
 }
 
+/* Badge for CPU info */
 .cpu-info-badge {
-    background-color: #0D1117;
-    color: #28a745;
+    background-color: #fdf2f2; /* Light red background similar to model badge style */
+    color: #b91c1c; /* Dark red text for contrast */
     padding: 5px 12px;
     border-radius: 15px;
     font-family: 'Inter', sans-serif;
     font-size: 13px;
     font-weight: 500;
-    border: 1px solid #30363d;
+    border: 1px solid #fca5a5; /* Soft red border */
     display: flex;
     align-items: center;
 }
@@ -622,7 +626,7 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 .blinking-light {
     width: 8px;
     height: 8px;
-    background-color: #28a745;
+    background-color: #dc2626; /* Red indicator light */
     border-radius: 50%;
     margin-right: 8px;
     animation: blink 1.5s infinite;
@@ -633,113 +637,193 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     50% { opacity: 0.2; }
 }
 
-/* Custom Footer Styles */
+/* Model status badge */
+.model-status-badge {
+    background-color: #f0f4f8;
+    color: #1f2937;
+    padding: 5px 12px;
+    border-radius: 15px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid #d0d7de;
+    display: flex;
+    align-items: center;
+}
+
+.model-status-badge.success {
+    background-color: #e6f7ed;
+    color: #1a7f37;
+    border-color: #a3d9b1;
+}
+
+.model-status-badge.warning {
+    background-color: #fff8e1;
+    color: #856404;
+    border-color: #ffd6a5;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-indicator.success {
+    background-color: #1a7f37;
+}
+
+.status-indicator.warning {
+    background-color: #856404;
+}
+
+/* === Footer Redesign === */
+.custom-footer::before, .custom-footer::after {
+    content: none !important;
+}
+
+@keyframes footer-gradient-move {
+    0%   { background-position: 0 0; }
+    100% { background-position: 400% 0; }
+}
+
 .custom-footer {
-    padding: 1rem; /* Reduced padding */
+    padding: 2.5rem 1.5rem;
     text-align: center;
-    background: linear-gradient(to bottom, #ffffff, #f8f9fa);
     width: 100%;
     box-sizing: border-box;
-    margin-top: 0; /* Removed top margin */
+    margin-top: 3rem;
+    position: relative;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+
+    border: 2px solid transparent;
+    background-image: linear-gradient(var(--app-bg, #ffffff), var(--app-bg, #ffffff)),
+        linear-gradient(90deg,
+            #ff0066,
+            #ff8c00,
+            #ffd500,
+            #00c853,
+            #00bcd4,
+            #3f51b5,
+            #d500f9,
+            #ff0066
+        );
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+    background-size: 100% 100%, 400% 100%;
+    animation: footer-gradient-move 8s linear infinite;
 }
 
 .custom-footer-hr {
-    max-width: 100px;
-    margin: 0 auto 1.5rem; /* Reduced bottom margin */
-    border: none;
-    height: 3px;
-    background: linear-gradient(to right, transparent, #0070f3, transparent);
-    opacity: 0.5;
+    display: none;
 }
 
 .custom-footer-h3 {
-    margin: 0 0 1.5rem; /* Reduced bottom margin */
+    margin: 0 0 2rem;
     font-size: 1.75rem;
-    font-weight: 600;
-    color: #1a1a1a;
+    font-weight: 700;
+    color: var(--text-color);
     letter-spacing: -0.02em;
-    position: relative;
-    display: inline-block;
 }
 
-.custom-footer-h3::after {
-    content: '';
-    position: absolute;
-    bottom: -10px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 40px;
-    height: 3px;
-    background-color: var(--primary-color);
-    border-radius: 2px;
-}
-
-.footer-columns {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
+.footer-links-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
     max-width: 1000px;
     margin: 0 auto;
-    padding: 0 1rem;
 }
 
-.footer-column {
-    text-align: center;
-    position: relative;
+.footer-link {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 10px 18px;
+    border-radius: 10px;
+    background-color: var(--secondary-button-bg);
+    border: 1px solid var(--secondary-button-border);
+    color: #444;
+    text-decoration: none !important;
+    font-weight: 500;
+    font-size: 0.95em;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
-.footer-column a {
-    display: inline-block;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border-radius: 8px;
-    padding: 0.5rem;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    border: 1px solid rgba(0, 0, 0, 0.05);
+.footer-link:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.07);
+    color: var(--primary-color);
 }
 
-.footer-column a:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.1);
-    border-color: rgba(0, 0, 0, 0.08);
+.footer-icon {
+    width: 20px;
+    height: 20px;
+    fill: #555;
+    transition: fill 0.2s ease;
 }
 
-.footer-column img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 6px;
+.footer-link:hover .footer-icon {
+    fill: var(--primary-color);
 }
 
-/* Responsive adjustments */
 @media (max-width: 768px) {
-    .footer-columns {
-        grid-template-columns: 1fr;
-        gap: 1.5rem;
-    }
-    
     .custom-footer {
-        padding: 1.5rem 1rem;
+        padding: 2rem 1rem;
     }
     
     .custom-footer-h3 {
         font-size: 1.5rem;
     }
+
+    .footer-links-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .footer-link {
+        width: 100%;
+        justify-content: center;
+        max-width: 320px;
+    }
 }
 
-/* Add hover effects for social links */
-.footer-column a[href*="linkedin"] {
-    border-color: #0077B5;
+/* Custom Tooltip for Debug Information */
+[data-tooltip] {
+    position: relative; /* Needed for positioning the pseudo-element */
+    cursor: help;
+    text-decoration: underline;
+    text-decoration-style: dotted;
 }
 
-.footer-column a[href*="github"] {
-    border-color: #181717;
+[data-tooltip]::after {
+    content: attr(data-tooltip); /* Use the data-tooltip attribute as content */
+    position: absolute;
+    bottom: 110%; /* Position above the element */
+    left: 50%;
+    transform: translateX(-50%);
+    
+    background-color: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-family: 'Inter', sans-serif;
+    white-space: normal; /* Allow wrapping */
+    width: 220px; /* Set a max-width */
+    text-align: center;
+    
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+    z-index: 1000;
 }
 
-.footer-column a:hover[href*="linkedin"] {
-    background-color: rgba(0, 119, 181, 0.05);
-}
-
-.footer-column a:hover[href*="github"] {
-    background-color: rgba(24, 23, 23, 0.05);
+[data-tooltip]:hover::after {
+    opacity: 1;
+    visibility: visible;
 }
 

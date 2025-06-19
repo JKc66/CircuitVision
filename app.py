@@ -174,18 +174,8 @@ if not st.session_state.circuit_analyzer_loaded_flag:
         st.session_state.circuit_analyzer_loaded_flag = True
         logger.info("Circuit analyzer initialized successfully (custom loader). Application ready.")
         
-        # Show toast notification for model loading status
-        if not st.session_state.model_load_toast_shown:
-            if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
-                st.toast("✅ Models loaded successfully (including SAM2).")
-            else:
-                # This condition implies models loaded, but SAM2 might be off or had an issue.
-                # use_sam2_feature (checked during CircuitAnalyzer init) determines if SAM2 checkpoint files were found.
-                if use_sam2_feature: # SAM2 files were found, but it's still not active on analyzer
-                    st.toast("✅ Core models loaded. SAM2 initialized but may not be fully active.", icon="⚠️")
-                else: # SAM2 files were not found initially
-                    st.toast("✅ Core models loaded. SAM2 features disabled (model files not found).", icon="⚠️")
-            st.session_state.model_load_toast_shown = True
+        # Mark that models have been loaded (no toast shown anymore)
+        st.session_state.model_load_toast_shown = True
 else:
     analyzer = st.session_state.circuit_analyzer_object_storage
 
@@ -244,15 +234,42 @@ if 'editable_netlist_content' not in st.session_state:
 # Get CPU info
 cpu_count = multiprocessing.cpu_count()
 
-# Display CPU info badge
-st.markdown(f"""
-<div class="cpu-info-badge-container">
-    <div class="cpu-info-badge">
-        <div class="blinking-light"></div>
-        Running on CPU ({cpu_count} cores)
+# Display badges
+if analyzer is not None and st.session_state.get('circuit_analyzer_loaded_flag', False):
+    if hasattr(analyzer, 'use_sam2') and analyzer.use_sam2:
+        model_status_class = "success"
+        model_status_text = "Models Ready (SAM2 Active)"
+    else:
+        model_status_class = "warning"
+        if use_sam2_feature:
+            model_status_text = "Models Ready (SAM2 Limited)"
+        else:
+            model_status_text = "Models Ready (No SAM2)"
+
+    # Display both badges - model status on left, CPU on right
+    st.markdown(f"""
+    <div class="system-badges-container">
+        <div class="model-status-badge {model_status_class}">
+            <div class="status-indicator {model_status_class}"></div>
+            {model_status_text}
+        </div>
+        <div class="cpu-info-badge">
+            <div class="blinking-light"></div>
+            Running on CPU ({cpu_count} cores)
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+else:
+    # If analyzer is not loaded yet, just show CPU badge on the right
+    st.markdown(f"""
+    <div class="system-badges-container">
+        <div></div> <!-- Empty spacer -->
+        <div class="cpu-info-badge">
+            <div class="blinking-light"></div>
+            Running on CPU ({cpu_count} cores)
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # Main content  
@@ -428,7 +445,7 @@ if st.session_state.active_results['original_image'] is not None:
             if 'uploaded_file_name' in st.session_state.active_results and st.session_state.active_results['uploaded_file_name'] is not None:
                 st.markdown(f"- **Name**: `{st.session_state.active_results['uploaded_file_name']}`")
             else:
-                st.markdown(f"- **Name**: `N/A`")
+                st.markdown("- **Name**: `N/A`")
             
             # EXIF data section
             st.markdown("### EXIF Data")
@@ -570,7 +587,12 @@ if st.session_state.active_results['original_image'] is not None:
                             elif yolo_class in analyzer.current_source_classes_names and semantic_reason == "SIGN":
                                 interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
                             
-                            output_line = f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` &#8594; `{interpreted_type}`"
+                            # Add tooltip to the semantic_direction part
+                            tooltip_text = "The direction (e.g., UP, DOWN) indicates the direction of conventional current flow, inferred from visual cues like arrows or polarity signs (+/-)."
+                            output_line = (
+                                f"{yolo_class} <code data-tooltip='{tooltip_text}'>{semantic_direction}</code> ; "
+                                f"<code>{semantic_reason}</code> &#8594; <code>{interpreted_type}</code>"
+                            )
                             
                             st.image(llama_input_image, width=100)
                             st.markdown(output_line, unsafe_allow_html=True)
@@ -806,24 +828,20 @@ if st.session_state.active_results['original_image'] is not None:
 # Add footer here
 footer_html = """
 <div class='custom-footer'>
-  <hr class='custom-footer-hr'>
-  <h3 class='custom-footer-h3'>Connect with Us</h3>
-  <div class='footer-columns'>
-    <div class='footer-column'>
-      <a href='https://www.linkedin.com/in/mah-sam/' target='_blank' rel='noopener noreferrer'>
-        <img src='https://img.shields.io/badge/LinkedIn-Mahmoud%20Sameh-0077B5?style=for-the-badge&logo=linkedin&logoColor=white' alt='Mahmoud Sameh LinkedIn'>
-      </a>
-    </div>
-    <div class='footer-column'>
-      <a href='https://www.linkedin.com/in/jawadk-c66/' target='_blank' rel='noopener noreferrer'>
-        <img src='https://img.shields.io/badge/LinkedIn-Jawad%20K-0077B5?style=for-the-badge&logo=linkedin&logoColor=white' alt='Jawad K LinkedIn'>
-      </a>
-    </div>
-    <div class='footer-column'>
-      <a href='https://github.com/JKc66/CircuitVision' target='_blank' rel='noopener noreferrer'>
-        <img src='https://img.shields.io/badge/GitHub-CircuitVision-181717?style=for-the-badge&logo=github&logoColor=white' alt='CircuitVision GitHub'>
-      </a>
-    </div>
+  <h3 class='custom-footer-h3'>Project & Authors</h3>
+  <div class='footer-links-container'>
+    <a href='https://www.linkedin.com/in/mah-sam/' target='_blank' rel='noopener noreferrer' class='footer-link'>
+      <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="footer-icon linkedin-icon"><title>LinkedIn</title><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z"/></svg>
+      <span>Mahmoud Sameh</span>
+    </a>
+    <a href='https://www.linkedin.com/in/jawadk-c66/' target='_blank' rel='noopener noreferrer' class='footer-link'>
+      <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="footer-icon linkedin-icon"><title>LinkedIn</title><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z"/></svg>
+      <span>Jawad K</span>
+    </a>
+    <a href='https://github.com/JKc66/CircuitVision' target='_blank' rel='noopener noreferrer' class='footer-link'>
+      <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="footer-icon github-icon"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+      <span>CircuitVision on GitHub</span>
+    </a>
   </div>
 </div>
 """
