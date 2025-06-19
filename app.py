@@ -151,13 +151,10 @@ if not st.session_state.circuit_analyzer_loaded_flag:
     loader_html = """
     <div class='initial-loader-container'>
         <div class='initial-loader-content'>
-            <div class='pacman-loader'>
-                <div class='pacman-top'></div>
-                <div class='pacman-bottom'></div>
-                <div class='pacman-dot'></div>
-                <div class='pacman-dot'></div>
-                <div class='pacman-dot'></div>
-                <div class='pacman-dot'></div>
+            <div class='circuit-model-loader'> 
+                <div></div>
+                <div></div>
+                <div></div>
             </div>
             <p style='margin-top: 10px;'>Loading Circuit Analyzer models, please wait...</p>
         </div>
@@ -191,7 +188,7 @@ if analyzer is None:
     logger.critical("FATAL: Analyzer object is None after loading logic. Forcing stop.")
     st.stop()
 
-logger.info("--"*60) 
+logger.info("--"*40) 
 logger.info("--"*60)
 
 # Create containers for results
@@ -286,7 +283,11 @@ with file_upload_container:
     uploaded_file = st.file_uploader(
         "Drag and drop your circuit diagram here",
         type=['png', 'jpg', 'jpeg'],
-        help="For best results, use a clear image"
+        help="""
+        **Limitations:**
+        - Supports AC/DC linear circuits.
+        - Dependent components are not yet supported.
+        """
     )
 
 # Process uploaded file

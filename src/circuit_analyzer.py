@@ -29,7 +29,7 @@ from groq import Groq
 import time
 import json # For parsing LLaMA JSON output
 
-# Load environment variables (e.g., for GROQ_API_KEY)
+# Load environment variables
 load_dotenv()
 # --- End Imports for Groq/LLaMA ---
 
@@ -712,25 +712,6 @@ class CircuitAnalyzer():
         for current_component_bbox_dict in component_bboxes_for_enumeration_dicts:
             current_comp_uid_debug = current_component_bbox_dict.get('persistent_uid', "UID_UNKNOWN")
 
-            # --- Conditional Numbering Logic --- 
-            has_nearby_text = False
-            for text_bbox_tuple in static_text_elements_bboxes_tuples:
-                if are_bboxes_proximal(current_component_bbox_dict, text_bbox_tuple, proximity_threshold=35):
-                    has_nearby_text = True
-                    if self.debug:
-                        print(f"Debug EnumSkip: Component UID {current_comp_uid_debug} HAS nearby text: {text_bbox_tuple}. Will be numbered.")
-                    break # Found a nearby text, no need to check further for this component
-            
-            if not has_nearby_text:
-                if self.debug:
-                    print(f"Debug EnumSkip: Component UID {current_comp_uid_debug} has NO nearby text. SKIPPING numbering.")
-                # Add to output_bbox_ids_with_visual_enum WITHOUT an 'id' if we still want to track it later, 
-                # or just continue to completely ignore it for enumeration.
-                # For now, let's just skip it from being numbered and added to the list that VLM uses.
-                output_bbox_ids_with_visual_enum.append(deepcopy(current_component_bbox_dict)) # Add it but it won't have an 'id' from bbox_counter
-                continue # Skip numbering this component
-            # --- End Conditional Numbering Logic ---
-
             bbox_counter += 1
             text_to_draw = f"{bbox_counter}"
             (current_text_width, current_text_height), _ = cv2.getTextSize(text_to_draw, font, font_scale, thickness)
@@ -1228,7 +1209,7 @@ class CircuitAnalyzer():
             # This prevents distant text boxes from massively expanding the crop.
             # For example, check if text_bbox_item overlaps or is near current_crop_xmin,ymin,xmax,ymax
             # A simple check: if text box is entirely outside a slightly expanded version of current crop window, ignore it.
-            expanded_check_padding = 50 # Check against a slightly larger current window
+            expanded_check_padding = 150 # Check against a slightly larger current window
             if not (text_xmax < current_crop_xmin - expanded_check_padding or \
                     text_xmin > current_crop_xmax + expanded_check_padding or \
                     text_ymax < current_crop_ymin - expanded_check_padding or \
@@ -2109,7 +2090,7 @@ class CircuitAnalyzer():
 
         base64_image = self._encode_image_for_llama(component_crop_rgb)
         prompt = None
-        model_to_use = "meta-llama/llama-4-scout-17b-16e-instruct" 
+        model_to_use = "meta-llama/llama-4-maverick-17b-128e-instruct" 
 
         if component_class_name in self.voltage_classes_names:
             prompt = """Analyze this image.

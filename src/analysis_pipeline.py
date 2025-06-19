@@ -374,7 +374,6 @@ def handle_final_netlist_generation(current_analyzer, active_results_dict, app_l
             for i, ln_debug in enumerate(netlist):
                 app_logger.debug(f"App.py netlist line {i} before stringify: {ln_debug}")
         
-        netlist = [line for line in netlist if line.get('value') is not None and str(line.get('value')).strip().lower() != 'none']
         netlist_text = '\n'.join([current_analyzer.stringify_line(line) for line in netlist])
         
         active_results_dict['netlist'] = netlist
