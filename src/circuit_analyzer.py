@@ -528,13 +528,6 @@ class CircuitAnalyzer():
             if region.size == 0: # Should not happen if in bounds and text_w/h > 0
                 return float('-inf')
             
-            # --- REMOVED SCORING BASED ON MEAN/STD --- 
-            # Old logic: 
-            # mean_intensity = np.mean(region)
-            # std_intensity = np.std(region)
-            # return mean_intensity - std_intensity * 0.5
-            # --- END REMOVED SCORING --- 
-            
             # New logic: Simply return a constant positive score if the region is valid for placement.
             # This means all valid regions will be treated equally by the sorting key that used to use this score.
             # The first geometrically valid position found will effectively be chosen.
@@ -1337,42 +1330,6 @@ class CircuitAnalyzer():
         for bbox_comp in bboxes_relative_to_mask:
             # MODIFIED: Log decision for the problematic terminal
             is_problematic_terminal_current_bbox = bbox_comp.get('persistent_uid') == problematic_terminal_uid
-
-            # Original condition:
-            # if bbox_comp['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
-            # For logging, let's explicitly state what happens to 'terminal'
-            
-            # MODIFIED: Removed 'terminal' from the list of components to preserve locally
-            # Check: self.non_components includes 'junction', 'crossover', 'vss', 'circuit'. 
-            # 'terminal' is NOT in self.non_components.
-            # The goal is to zero out component bodies to leave only wires for contour finding.
-            # If a component is a 'terminal' (a connection point, not a source), its area might be small
-            # and part of the wire path.
-            # The critical part is that large components (like sources, R, L, C) are zeroed out.
-            # Small junctions, true terminals (if classified as such and small) should ideally be preserved if they
-            # form part of the conductive path structure.
-            # The current `components_to_preserve_locally` only has `('crossover', 'junction', 'circuit', 'vss')`.
-            # This means 'terminal' (if it's not in self.non_components) *would* be zeroed out by the `else`
-            # if `bbox_comp['class'] not in components_to_preserve_locally` evaluates to true.
-            # Let's refine this based on `self.non_components` vs actual components.
-            # We want to preserve "connection-like" elements and wires, and remove "component-body-like" elements.
-
-            # If bbox_comp['class'] is an actual component (e.g. resistor, capacitor, voltage.dc)
-            # AND not one of the special pass-throughs like 'junction', 'crossover', 'vss', then zero it.
-            # 'terminal' is tricky. If it refers to a large source body (e.g. reclassified from terminal to voltage.dc),
-            # then `bbox_comp['class']` would be `voltage.dc`, and it would be zeroed.
-            # If `bbox_comp['class']` is still `terminal` (meaning it was a YOLO 'terminal' and was NOT reclassified),
-            # then it might be a small dot.
-            # The `self.non_components` set is: {'text', 'junction', 'crossover', 'vss', 'explanatory', 'circuit'}
-            # Actual components are things NOT in `self.non_components`.
-
-            # Revised logic for zeroing out:
-            # Zero out if it's an "actual component" (not in non_components)
-            # UNLESS it's a special case we want to keep for wire structure (e.g. tiny terminals if they were part of wires)
-            # For now, the existing `components_to_preserve_locally` seems to handle specific preservations.
-            # If a 'terminal' (original YOLO classification) is *not* in `components_to_preserve_locally`, it gets zeroed.
-            # This is likely the desired behavior to remove the body of a source that might still be called 'terminal'
-            # if reclassification didn't catch it but LLaMA/VLM will.
             
             components_to_preserve_locally_in_mask = ('crossover', 'junction', 'circuit', 'vss') 
             
@@ -2309,16 +2266,7 @@ Example responses:
         # Note: segment_circuit returns a binary inverted mask (lines are white 255, bg is 0)
         segmented_mask_for_prelim = self.segment_circuit(image_bgr_original) 
 
-        # Get an "emptied" version of this mask, where component bodies are zeroed out.
-        # get_emptied_mask internally calls segment_circuit again if it needs to,
-        # but here we pass the already segmented one.
-        # However, get_emptied_mask expects BGR image, and bboxes_list_to_modify are in original image coords.
-        # We need to be careful here. Let's re-evaluate.
-        # get_emptied_mask is designed to work on the visual image.
-        
-        # Let's use the direct path: segment, then manually empty based on bboxes_list_to_modify
-        # to create a mask of just the wires.
-        
+    
         prelim_wire_mask = segmented_mask_for_prelim.copy()
         components_to_ignore_for_emptying = ('crossover', 'junction', 'circuit', 'vss') # Similar to get_emptied_mask
         
@@ -2332,22 +2280,6 @@ Example responses:
         if self.debug:
             self.show_image(prelim_wire_mask, "Prelim - Wire Mask for Terminal Reclassification")
 
-        # Now, find contours on this prelim_wire_mask
-        # get_contours expects lines to be white on black if auto-inversion happens,
-        # or black lines on white if mean is low. Our prelim_wire_mask has wires as 0 (black)
-        # and background as 255 (white) after emptying components from an inverted segment_circuit output.
-        # This might require an inversion before get_contours or careful handling within.
-        # segment_circuit output: lines=255, bg=0.
-        # prelim_wire_mask after emptying: components are 0, wires could be 255, bg could be 0.
-        # Let's ensure wires are white (255) and everything else is black (0) for get_contours.
-        
-        # If segment_circuit makes lines 255 and bg 0:
-        # prelim_wire_mask initially has lines as 255, bg as 0.
-        # When we empty components (bbox_prelim['class'] not in components_to_ignore_for_emptying),
-        # those areas become 0. So, wires remain 255. This should be fine for get_contours.
-        
-        # get_contours typically expects an inverted image (lines white, background black) or will invert it.
-        # Our prelim_wire_mask should have wires as 255 (white) and non-wire areas as 0 (black).
         prelim_contours, _ = self.get_contours(prelim_wire_mask, area_threshold=0.0001) # Use a smaller threshold for prelim
 
         if self.debug:
