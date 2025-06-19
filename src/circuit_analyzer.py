@@ -842,8 +842,7 @@ class CircuitAnalyzer():
         mask = self.segment_circuit(image)
         if self.debug:
             self.show_image(mask, 'Segmented')
-        # Check if background is predominantly black
-        # Calculate the percentage of black pixels in the border regions
+    
         
         image_copy = mask.copy()  # Work with a copy of the potentially inverted mask
         
@@ -852,23 +851,8 @@ class CircuitAnalyzer():
             if self.debug:
                 print(f"EmptiedMask Log: Processing bbox class: {bbox['class']}, UID: {bbox.get('persistent_uid')}")
             
-            #MODIFIED: Preserve terminal if it IS NOT a source component
-            # We want to remove the area of the AC source, even if YOLO calls it 'terminal'.
-            # The VLM will later confirm its true type. Regular terminals (small connection points)
-            # might still need their areas preserved if they are small and distinct from wires.
-            # However, given the current YOLO output, the AC source is large and called 'terminal'.
-            # For now, let's assume if YOLO calls something 'terminal' AND it's large enough to be a source,
-            # we should try to empty it. But the simplest first step is to empty ALL 'terminal' designated areas
-            # and see if that correctly isolates wires from the AC source body.
-            # A more nuanced approach might be needed if small, true terminals are wrongly erased.
-
-            # Original problematic line:
-            # if bbox['class'] not in ('crossover', 'junction', 'terminal', 'circuit', 'vss'):
-            
-            # Temporarily, let's try removing 'terminal' from the skip list here too,
-            # to see if it makes the AC source get emptied.
-            # This is to test the hypothesis that 'terminal' in this list is the sole problem for the AC source.
-            components_to_preserve_in_mask = ('crossover', 'junction', 'circuit', 'vss') # 'terminal' removed for testing
+           
+            components_to_preserve_in_mask = ('crossover', 'junction', 'circuit', 'vss') 
 
             if bbox['class'] not in components_to_preserve_in_mask:
                 if self.debug:
@@ -998,13 +982,13 @@ class CircuitAnalyzer():
         crop_basis_bbox = None # This will be (xmin, ymin, xmax, ymax) tuple
 
         if not elements_for_clustering: # MODIFIED from component_type_bboxes
-            if self.debug: print("Crop: No elements_for_clustering (components or junctions) found. No basis for crop.") # MODIFIED
-            crop_debug_info['reason_for_no_crop'] = "no_elements_for_clustering" # MODIFIED
-            crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_clustering_elements" # MODIFIED
+            if self.debug: print("Crop: No elements_for_clustering (components or junctions) found. No basis for crop.") 
+            crop_debug_info['reason_for_no_crop'] = "no_elements_for_clustering" 
+            crop_debug_info['crop_decision_source'] = "no_crop_due_to_no_clustering_elements" 
             return image_to_crop, [deepcopy(b) for b in all_yolo_bboxes_input], crop_debug_info
         else:
-            # Build adjacency list for elements_for_clustering # MODIFIED
-            adj = {i: [] for i in range(len(elements_for_clustering))} # MODIFIED
+            # Build adjacency list for elements_for_clustering 
+            adj = {i: [] for i in range(len(elements_for_clustering))} 
             
             # Dynamic proximity threshold for clustering
             # Calculate average component size for a more adaptive threshold
@@ -1032,16 +1016,16 @@ class CircuitAnalyzer():
             
             crop_debug_info['clustering_proximity_threshold'] = clustering_prox_threshold
 
-            for i in range(len(elements_for_clustering)): # MODIFIED
-                for j in range(i + 1, len(elements_for_clustering)): # MODIFIED
-                    if self._are_bboxes_proximal_for_clustering(elements_for_clustering[i], elements_for_clustering[j], proximity_threshold=clustering_prox_threshold): # MODIFIED
+            for i in range(len(elements_for_clustering)): 
+                for j in range(i + 1, len(elements_for_clustering)): 
+                    if self._are_bboxes_proximal_for_clustering(elements_for_clustering[i], elements_for_clustering[j], proximity_threshold=clustering_prox_threshold): 
                         adj[i].append(j)
                         adj[j].append(i)
 
             # Find connected components (DFS)
-            visited_indices = [False] * len(elements_for_clustering) # MODIFIED
+            visited_indices = [False] * len(elements_for_clustering) 
             clusters_of_bboxes_list = [] # List of lists of bbox dicts
-            for i in range(len(elements_for_clustering)): # MODIFIED
+            for i in range(len(elements_for_clustering)): 
                 if not visited_indices[i]:
                     current_cluster_member_bboxes = []
                     component_indices_in_stack = [i]
@@ -1049,7 +1033,7 @@ class CircuitAnalyzer():
                         u_idx = component_indices_in_stack.pop()
                         if not visited_indices[u_idx]:
                             visited_indices[u_idx] = True
-                            current_cluster_member_bboxes.append(elements_for_clustering[u_idx]) # MODIFIED
+                            current_cluster_member_bboxes.append(elements_for_clustering[u_idx]) 
                             # Iterate over neighbors from adjacency list
                             for v_neighbor_idx in adj[u_idx]:
                                 if not visited_indices[v_neighbor_idx]:
@@ -1060,14 +1044,14 @@ class CircuitAnalyzer():
             crop_debug_info['num_clusters_found'] = len(clusters_of_bboxes_list)
 
             if not clusters_of_bboxes_list:
-                if self.debug: print("Crop: Elements for clustering found, but no clusters formed. Using union of all elements.") # MODIFIED
-                min_x = min(b['xmin'] for b in elements_for_clustering) # MODIFIED
-                min_y = min(b['ymin'] for b in elements_for_clustering) # MODIFIED
-                max_x = max(b['xmax'] for b in elements_for_clustering) # MODIFIED
-                max_y = max(b['ymax'] for b in elements_for_clustering) # MODIFIED
+                if self.debug: print("Crop: Elements for clustering found, but no clusters formed. Using union of all elements.") 
+                min_x = min(b['xmin'] for b in elements_for_clustering) 
+                min_y = min(b['ymin'] for b in elements_for_clustering) 
+                max_x = max(b['xmax'] for b in elements_for_clustering) 
+                max_y = max(b['ymax'] for b in elements_for_clustering) 
                 crop_basis_bbox = (min_x, min_y, max_x, max_y)
-                crop_debug_info['crop_decision_source'] = "union_of_isolated_elements_for_clustering" # MODIFIED
-                crop_debug_info['main_cluster_info'] = "all_elements_isolated_used_union" # MODIFIED
+                crop_debug_info['crop_decision_source'] = "union_of_isolated_elements_for_clustering" 
+                crop_debug_info['main_cluster_info'] = "all_elements_isolated_used_union" 
             else:
                 # Refined main cluster selection:
                 # Score clusters by component count and text association.
@@ -2165,10 +2149,6 @@ Example responses:
             if self.debug:
                 print("Groq client not initialized. Skipping semantic direction enrichment.")
             return
-        
-        # MODIFICATION: Removed hardcoded numeric_classes_of_interest and confidence_threshold
-        # These are now based on self.llama_numeric_classes_of_interest and self.llama_classes_of_interest_names
-        # A confidence threshold can be added as a class attribute or parameter if needed.
 
         for bbox in bboxes:
             yolo_numeric_cls_id = bbox.get('_yolo_class_id_temp') 
