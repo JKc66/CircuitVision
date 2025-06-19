@@ -908,3 +908,84 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     80%  { transform: translateX(-65px) scale(0.4,1.4); opacity: 0.4; }
     100% { transform: translateX(-70px) scale(0);        opacity: 0; }
 }
+
+/* === Custom Tab Styles === */
+
+/* The tab bar container */
+div[data-testid="stTabs"] > div[role="tablist"] {
+    border-bottom: 2px solid var(--subtle-border-color);
+    padding-bottom: 0;
+    margin-bottom: 24px;
+}
+
+/* Individual tab buttons */
+div[data-testid="stTabs"] button[data-baseweb="tab"] {
+    background-color: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: #555;
+    padding: 10px 4px; /* Reduced side padding, let margin handle spacing */
+    margin: 0 12px; /* Spacing between tabs */
+    margin-bottom: -2px; /* Align underline with container border */
+    font-weight: 500;
+    font-size: 1.05em;
+    transition: all 0.2s ease-in-out;
+    border-radius: 0; /* Remove default radius, rely on underline */
+}
+
+/* Remove left padding from the very first tab */
+div[data-testid="stTabs"] button[data-baseweb="tab"]:first-child {
+    margin-left: 0;
+}
+
+/* Hover effect for inactive tabs */
+div[data-testid="stTabs"] button[data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+    background-color: rgba(0, 112, 243, 0.05);
+    color: var(--primary-color);
+    border-radius: 6px 6px 0 0;
+}
+
+/* Style for the currently selected tab */
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+    color: var(--primary-color);
+    font-weight: 600;
+    border-bottom-color: var(--primary-color);
+}
+
+/* === Responsive Tab Styles for Mobile === */
+@media (max-width: 768px) {
+    /* Make the main tab component the positioning context for the fade effect */
+    div[data-testid="stTabs"] {
+        position: relative;
+    }
+
+    /* The direct child container that holds the tabs needs to scroll */
+    div[data-testid="stTabs"] > div[role="tablist"] {
+        overflow-x: auto;
+        -ms-overflow-style: none;  /* Hide scrollbar on IE and Edge */
+        scrollbar-width: none;  /* Hide scrollbar on Firefox */
+    }
+
+    /* Hide scrollbar for Webkit browsers (Chrome, Safari) */
+    div[data-testid="stTabs"] > div[role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Create the fade effect on the main non-scrolling parent */
+    div[data-testid="stTabs"]::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 60px; /* Width of the fade */
+        height: 48px; /* Height to cover the tab bar, not content below */
+        background: linear-gradient(to left, var(--app-bg) 40%, hsla(0, 0%, 100%, 0));
+        pointer-events: none; /* Let clicks pass through to the tabs */
+        z-index: 2; /* Position it above the tabs */
+    }
+
+    /* Prevent individual tabs from shrinking, forcing them to overflow */
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        flex-shrink: 0;
+    }
+}
