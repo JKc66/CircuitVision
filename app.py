@@ -151,10 +151,13 @@ if not st.session_state.circuit_analyzer_loaded_flag:
     loader_html = """
     <div class='initial-loader-container'>
         <div class='initial-loader-content'>
-            <div class='circuit-model-loader'> 
-                <div></div>
-                <div></div>
-                <div></div>
+            <div class='pacman-loader'>
+                <div class='pacman-top'></div>
+                <div class='pacman-bottom'></div>
+                <div class='pacman-dot'></div>
+                <div class='pacman-dot'></div>
+                <div class='pacman-dot'></div>
+                <div class='pacman-dot'></div>
             </div>
             <p style='margin-top: 10px;'>Loading Circuit Analyzer models, please wait...</p>
         </div>
@@ -313,8 +316,15 @@ if st.session_state.get('start_analysis_triggered', False):
                 st.markdown("""
                     <div class="loader-popup-overlay">
                         <div class="loader-popup-content">
-                            <div class="loader"></div>
-                            <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">please wait ...</p>
+                            <div class="pacman-loader">
+                                <div class='pacman-top'></div>
+                                <div class='pacman-bottom'></div>
+                                <div class="pacman-dot"></div>
+                                <div class="pacman-dot"></div>
+                                <div class="pacman-dot"></div>
+                                <div class="pacman-dot"></div>
+                            </div>
+                            <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Analyzing... 15 - 20 seconds</p>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)

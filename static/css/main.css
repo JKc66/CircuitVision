@@ -827,3 +827,142 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     visibility: visible;
 }
 
+/* === Pac-Man Loader Styles === */
+.pacman-loader {
+    width: 50px;
+    height: 50px;
+    position: relative;
+    transform: rotate(0deg); 
+}
+
+.pacman-top, .pacman-bottom {
+    background-color: #FFCA28; /* brighter Pac-Man yellow */
+    height: 25px;
+    width: 50px;
+    position: absolute;
+    left: 0;
+    z-index: 2; /* sit above dots */
+}
+
+.pacman-top {
+    top: 0;
+    border-radius: 25px 25px 0 0;
+    transform-origin: bottom center;
+    animation: pacman-chomp-top 0.6s infinite linear;
+}
+
+.pacman-bottom {
+    bottom: 0;
+    border-radius: 0 0 25px 25px;
+    transform-origin: top center;
+    animation: pacman-chomp-bottom 0.6s infinite linear;
+}
+
+@keyframes pacman-chomp-top {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(-40deg); }
+}
+
+@keyframes pacman-chomp-bottom {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(40deg); }
+}
+
+/* Update electron dot styling */
+.pacman-loader .pacman-dot {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    top: 18px; /* vertically centered ( (50-14)/2 ) */
+    left: 80px; /* start a bit further right so travel is longer */
+    background: radial-gradient(circle at 30% 30%, #ffffff 0 20%, #30d7ff 25% 70%, #0077ff 75% 100%);
+    box-shadow: 0 0 6px rgba(0, 136, 255, 0.7), 0 0 10px rgba(0,136,255,0.4);
+    animation: pacman-electron-move 2s infinite linear;
+    z-index: 1; /* behind Pac-Man */
+}
+
+/* minus sign on each electron */
+.pacman-loader .pacman-dot::after {
+    content: "−"; /* minus sign */
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+/* stagger delays remain */
+.pacman-loader .pacman-dot:nth-child(3) { animation-delay: 0s; }
+.pacman-loader .pacman-dot:nth-child(4) { animation-delay: 0.4s; }
+.pacman-loader .pacman-dot:nth-child(5) { animation-delay: 0.8s; }
+.pacman-loader .pacman-dot:nth-child(6) { animation-delay: 1.2s; }
+
+/* Override electron animation for better timing */
+@keyframes pacman-electron-move {
+    0%   { transform: translateX(0) scale(1);   opacity: 1; }
+    60%  { transform: translateX(-55px) scale(1); opacity: 1; }
+    70%  { transform: translateX(-60px) scale(1.3,0.6); opacity: 0.9; }
+    80%  { transform: translateX(-65px) scale(0.4,1.4); opacity: 0.4; }
+    100% { transform: translateX(-70px) scale(0);        opacity: 0; }
+}
+
+/* === Glassmorphic Card for Loaders === */
+.initial-loader-content,
+.loader-popup-content {
+    background: rgba(255, 255, 255, 0.15); /* Slightly more transparent */
+    backdrop-filter: blur(16px) saturate(180%) brightness(105%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(105%);
+    border-radius: 20px; /* Slightly more rounded */
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.2),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+        inset 0 1px 1px rgba(255, 255, 255, 0.2); /* Inner highlight */
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Add subtle gradient overlay */
+.initial-loader-content::before,
+.loader-popup-content::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(
+        circle at center,
+        rgba(255, 255, 255, 0.1) 0%,
+        rgba(255, 255, 255, 0.05) 30%,
+        transparent 70%
+    );
+    pointer-events: none;
+}
+
+/* Hover effects */
+.initial-loader-content:hover,
+.loader-popup-content:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.25),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.15),
+        inset 0 1px 1px rgba(255, 255, 255, 0.25);
+}
+
+/* Center text color against semi-transparent bg */
+.initial-loader-content p,
+.loader-popup-content p {
+    color: rgba(255, 255, 255, 0.95); /* Slightly transparent white for better blend */
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    margin: 0.5em 0;
+    position: relative;
+    z-index: 1; /* Ensure text stays above the gradient overlay */
+}
