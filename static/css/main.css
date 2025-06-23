@@ -722,11 +722,12 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 .custom-footer {
-    padding: 1.5rem 1.5rem;
+    padding: 1rem 1.5rem;
     text-align: center;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 1.5rem;
+    margin-top: 0.5rem;
+    margin-bottom: 1.5rem;
     position: relative;
     border-radius: 0;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
@@ -752,7 +753,7 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 .custom-footer-h3 {
-    margin: 0 0 2rem;
+    margin: 0 0 1rem;
     font-size: 1.75rem;
     font-weight: 700;
     color: var(--text-color);
