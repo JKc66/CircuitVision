@@ -643,7 +643,7 @@ if st.session_state.active_results['original_image'] is not None:
                                     interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
                                 
                                 output_line = (
-                                    f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` → `{interpreted_type}`"
+                                    f"{yolo_class} `{semantic_direction}`;`{semantic_reason}`→`{interpreted_type}`"
                                 )
                                 
                                 st.image(vlm_input_image, width=100)
