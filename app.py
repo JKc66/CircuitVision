@@ -642,19 +642,16 @@ if st.session_state.active_results['original_image'] is not None:
                                 elif yolo_class in analyzer.current_source_classes_names and semantic_reason == "SIGN":
                                     interpreted_type = "voltage.ac" if ".ac" in yolo_class else "voltage.dc"
                                 
-                                # Add tooltip to the semantic_direction part
-                                tooltip_text = "The direction (e.g., UP, DOWN) indicates the direction of conventional current flow, inferred from visual cues like arrows or polarity signs (+/-)."
                                 output_line = (
-                                    f"<div class='source-direction-output'>{yolo_class} <code data-tooltip='{tooltip_text}'>{semantic_direction}</code> ; "
-                                    f"<code>{semantic_reason}</code> &#8594; <code>{interpreted_type}</code></div>"
+                                    f"{yolo_class} `{semantic_direction}` ; `{semantic_reason}` → `{interpreted_type}`"
                                 )
                                 
                                 st.image(vlm_input_image, width=100)
-                                st.markdown(output_line, unsafe_allow_html=True)
+                                st.markdown(output_line)
                                 found_at_least_one_image_to_display = True
                         
                         if not found_at_least_one_image_to_display:
-                            st.info("VLM input images are available in the analyzer, but no components in the current results have matching UIDs with stored images or the required semantic direction information to display their specific VLM input image.")
+                            st.info("No components found with matching UIDs and semantic direction data.")
             
             else:
                 st.info("Run analysis to see component detection")
