@@ -43,7 +43,6 @@ logging.basicConfig(
 logger = logging.getLogger("circuit_analyzer")
 logger.info(f"Initializing Circuit Analyzer with log level: {log_level}")
 
-# Reduce verbosity of httpcore and openai loggers
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("groq._base_client").setLevel(logging.WARNING)
@@ -52,7 +51,6 @@ logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("PIL.TiffImagePlugin").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
-# Suppress PyTorch model parameter logs
 logging.getLogger("torch.nn.modules").setLevel(logging.WARNING)
 logging.getLogger("torch.nn.parameter").setLevel(logging.WARNING)
 logging.getLogger("torch").setLevel(logging.WARNING)
