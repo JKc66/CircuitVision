@@ -1,31 +1,36 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-    --primary-color: #0070f3; /* Next.js/ Blue */
-    --primary-text-color: #ffffff;
-    --secondary-button-bg: #ffffff;
-    --secondary-button-text: #333333;
-    --secondary-button-border: #e0e0e0;
-    --secondary-button-hover-bg: #f0f0f0;
-    --secondary-button-hover-border: #cccccc;
-    --app-bg: #ffffff; /* Light theme background */
-    --text-color: #111827; /* Dark text for content */
-    --subtle-border-color: #eaeaea;
-    --input-bg-color: #ffffff;
-    --input-border-color: #d1d5db; /* Tailwind gray-300 */
+    --primary-color: #00ff7f; /* Spring Green */
+    --primary-text-color: #000000;
+    --secondary-button-bg: #333333;
+    --secondary-button-text: #ffffff;
+    --secondary-button-border: #555555;
+    --secondary-button-hover-bg: #444444;
+    --secondary-button-hover-border: #666666;
+    --app-bg: #121212;
+    --text-color: #e0e0e0;
+    --subtle-border-color: #333333;
+    --input-bg-color: #1e1e1e;
+    --input-border-color: #444444;
 }
 
 body {
     background-color: var(--app-bg);
     color: var(--text-color);
-    font-family: 'Inter', sans-serif; /* Apply Inter font */
-    -webkit-font-smoothing: antialiased; /* Improve font rendering on WebKit */
-    -moz-osx-font-smoothing: grayscale; /* Improve font rendering on Firefox */
+    font-family: 'JetBrains Mono', monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-image:
+        linear-gradient(rgba(0, 255, 127, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 127, 0.05) 1px, transparent 1px);
+    background-size: 35px 35px;
 }
 
 /* General Button Styling - Base for Primary and Secondary */
 button[data-testid^="stBaseButton-"] {
-    border-radius: 6px;
+    border-radius: 0;
     padding: 10px 18px; /* Slightly larger padding for general buttons */
     font-weight: 500;
     font-size: 0.95em;
@@ -42,22 +47,22 @@ button[data-testid="stBaseButton-primary"] {
 }
 
 button[data-testid="stBaseButton-primary"]:hover {
-    background-color: #0056b3; /* Darker shade of primary */
-    border-color: #0056b3;
-    box-shadow: 0 2px 8px rgba(0, 112, 243, 0.2);
+    background-color: #00cc66; /* Darker shade of primary */
+    border-color: #00cc66;
+    box-shadow: 0 2px 8px rgba(0, 255, 127, 0.2);
 }
 
 button[data-testid="stBaseButton-primary"]:active {
-    background-color: #004080; /* Even darker */
-    border-color: #004080;
+    background-color: #00994d; /* Even darker */
+    border-color: #00994d;
     box-shadow: none;
 }
 
 button[data-testid="stBaseButton-primary"]:disabled,
 button[data-testid="stBaseButton-primary"][disabled] {
-    background-color: #a0cfff; /* Lighter, desaturated blue */
-    border-color: #a0cfff;
-    color: #e0f0ff; /* Very light text */
+    background-color: #00b359; /* Lighter, desaturated blue */
+    border-color: #00b359;
+    color: #a0a0a0; /* Very light text */
     cursor: not-allowed;
 }
 
@@ -71,12 +76,12 @@ button[data-testid="stBaseButton-secondary"] {
 button[data-testid="stBaseButton-secondary"]:hover {
     background-color: var(--secondary-button-hover-bg);
     border-color: var(--secondary-button-hover-border);
-    color: #000000;
+    color: #ffffff;
 }
 
 button[data-testid="stBaseButton-secondary"]:active {
-    background-color: #e0e0e0; /* Darker gray on active/press */
-    border-color: #b0b0b0;
+    background-color: #555555; /* Darker gray on active/press */
+    border-color: #777777;
 }
 
 button[data-testid="stBaseButton-secondary"]:disabled,
@@ -104,20 +109,45 @@ button[data-testid="stBaseButton-secondary"][disabled] {
 
 /* Reduce space above banner */
 .st-emotion-cache-1w723zb {
-    padding: 1rem 1rem 10rem !important;
+    padding: 1rem 1rem 1rem !important;
 }
 
+/* New styles for the custom component statistics table */
+.component-stats-table table {
+    width: 100%;
+    font-size: 0.9em; /* Slightly smaller font */
+    border-collapse: collapse;
+}
 
+.component-stats-table th, .component-stats-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--subtle-border-color);
+}
+
+.component-stats-table th {
+    font-weight: 600;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Styles for the source direction debug output */
+.source-direction-output {
+    font-size: 0.8em;
+    font-family: 'JetBrains Mono', monospace;
+}
+.source-direction-output code {
+    font-size: 1em; /* Inherit parent font size */
+}
 
 /* Style inline code (text between backticks) */
 code {
-    color: #d35400 !important; /* Rich orange text */
-    background-color: #fff6ed; /* Very light orange/peach background */
+    color: #00ff7f !important; /* Spring Green text */
+    background-color: #2e2e2e; /* Dark background */
     padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid #ffd9b3; /* Soft orange border */
+    border-radius: 0;
+    border: 1px solid #444444; /* Soft border */
     font-family: 'JetBrains Mono', 'Fira Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-    font-size: 0.95em;
+    font-size: 0.8em;
     line-height: 1.5;
     box-shadow: none;
     transition: none;
@@ -125,16 +155,16 @@ code {
 
 /* Style for Streamlit expander (dropdown) - General */
 div[data-testid="stExpander"] {
-    background-color: var(--app-bg);
-    border-radius: 6px;
+    background-color: #1e1e1e;
+    border-radius: 0;
     margin-bottom: 12px;
-    border: 1px solid transparent; /* Initially transparent border */
+    border: 1px solid var(--subtle-border-color); /* Initially transparent border */
     overflow: hidden;
     transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
 }
 
 div[data-testid="stExpander"]:hover {
-    border-color: var(--subtle-border-color); /* Subtle border on hover */
+    border-color: #444444; /* Subtle border on hover */
     /* box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); */ /* Optional: subtle shadow for lift */
 }
 
@@ -149,7 +179,7 @@ div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
 }
 
 div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:hover {
-    background-color: rgba(0, 0, 0, 0.02); /* Very subtle tint on hover */
+    background-color: rgba(255, 255, 255, 0.05); /* Very subtle tint on hover */
 }
 
 div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpanderHeader"] {
@@ -159,7 +189,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
 /* Styling for the content area within the expander */
 div[data-testid="stExpanderDetails"] {
     padding: 18px; /* Padding for the content */
-    background-color: transparent; /* Ensure content area bg is also transparent or app-bg */
+    background-color: #1e1e1e; /* Ensure content area bg is also transparent or app-bg */
 }
 
 /* Remove default Streamlit border from the header as we manage it - this might be less critical now but safe to keep */
@@ -171,37 +201,35 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     border-bottom: 1px solid var(--subtle-border-color);
 }
 
-
 /* Detailed Timings Expander - Custom Styling */
 .detailed-timings-expander div[data-testid="stExpander"] {
-    background-color: #e6ffed; /* Light green background for content area */
-    border: 1px solid #a3d9b1; /* Greenish border - keep distinct */
-    border-radius: 6px; /* Consistent border-radius */
+    background-color: #1a2b22; /* Light green background for content area */
+    border: 1px solid #004d1a; /* Greenish border - keep distinct */
+    border-radius: 0; /* Consistent border-radius */
 }
 
 .detailed-timings-expander div[data-testid="stExpander"]:hover {
-    border-color: #8ccaa1; /* Slightly darker green border on hover */
+    border-color: #006622; /* Slightly darker green border on hover */
     /* box-shadow: 0 2px 8px rgba(163, 217, 177, 0.3); */ /* Optional: green-tinted shadow */
 }
 
-
 .detailed-timings-expander div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"] {
-    background-color: #c9f7d5; /* Slightly darker green for the header */
-    color: #004d00; /* Dark green text for contrast */
+    background-color: #223c2d; /* Slightly darker green for the header */
+    color: #99ffc2; /* Dark green text for contrast */
     /* padding will be inherited or can be set specifically if needed */
 }
 
 .detailed-timings-expander div[data-testid="stExpander"] > div[data-testid="stExpanderHeader"]:hover {
-    background-color: #b8f5c9; /* Lighter green tint on hover for header */
+    background-color: #2a4b37; /* Lighter green tint on hover for header */
 }
 
 .detailed-timings-expander div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpanderHeader"] {
-    border-bottom: 1px solid #a3d9b1; /* Greenish border when expanded */
+    border-bottom: 1px solid #004d1a; /* Greenish border when expanded */
 }
 
 .detailed-timings-expander div[data-testid="stExpanderDetails"] {
     padding: 18px; /* Consistent padding */
-    background-color: #e6ffed; /* Ensure content area matches expander bg */
+    background-color: #1a2b22; /* Ensure content area matches expander bg */
 }
 
 /* New styles for the pop-up loader */
@@ -211,7 +239,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent background */
+    background-color: rgba(0, 0, 0, 0.85); /* Semi-transparent background */
     display: flex;
     justify-content: center;
     align-items: center;
@@ -219,9 +247,9 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
 }
 
 .loader-popup-content {
-    background-color: #ffffff; /* White background for the pop-up box */
+    background-color: #1e1e1e; /* White background for the pop-up box */
     padding: 40px; /* Increased padding */
-    border-radius: 12px; /* Slightly more rounded corners */
+    border-radius: 0; /* Slightly more rounded corners */
     box-shadow: 0 5px 20px rgba(0, 0, 0, 0.25); /* Enhanced shadow */
     text-align: center;
     display: flex;
@@ -229,6 +257,11 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     align-items: center;
     justify-content: center;
     min-width: 300px; /* Minimum width for the popup box */
+    border: 1px solid var(--subtle-border-color);
+}
+
+.loader-popup-text {
+    margin: 0; /* Reset margin */
 }
 
 /* Custom Loader CSS */
@@ -236,10 +269,10 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     position: relative;
     width: 120px;
     height: 140px;
-    background-image: radial-gradient(circle 30px, #555 100%, transparent 0),
-    radial-gradient(circle 5px, #555 100%, transparent 0),
-    radial-gradient(circle 5px, #555 100%, transparent 0),
-    linear-gradient(#555 20px, transparent 0);
+    background-image: radial-gradient(circle 30px, #cccccc 100%, transparent 0),
+    radial-gradient(circle 5px, #cccccc 100%, transparent 0),
+    radial-gradient(circle 5px, #cccccc 100%, transparent 0),
+    linear-gradient(#cccccc 20px, transparent 0);
     background-position: center 127px , 94px 102px , 16px 18px, center 114px;
     background-size: 60px 60px, 10px 10px , 10px 10px , 4px 14px;
     background-repeat: no-repeat;
@@ -251,7 +284,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     width: 100px;
     height: 100px;
     border-radius:50%;
-    border: 3px solid #555; /* Changed from #fff */
+    border: 3px solid #cccccc; /* Changed from #fff */
     left: 50%;
     top: 50%;
     transform: translate(-50%, -55%) rotate(-45deg);
@@ -267,7 +300,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     left: 50%;
     top: 50%;
     box-sizing: border-box;
-    border: 7px solid #FF3D00;
+    border: 7px solid var(--primary-color);
     border-radius:50%;
     animation: rotate 0.5s linear infinite;
   }
@@ -318,7 +351,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     gap: 0.75rem; /* Reduced gap slightly */
     padding: 1.5rem; /* Adjusted padding */
     background-color: var(--app-bg); 
-    border-radius: 8px;
+    border-radius: 0;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     color: var(--text-color);
     border: 1px solid var(--subtle-border-color);
@@ -350,7 +383,7 @@ div[data-testid="stExpander"][aria-expanded="true"] > div[data-testid="stExpande
     height: 100%;
     margin: 0 3px; /* Spacing between bars */
     background-color: var(--primary-color); /* Use your app's primary color */
-    border-radius: 3px;
+    border-radius: 0;
     animation: pulse-bars 1.2s infinite ease-in-out;
 }
 
@@ -391,15 +424,15 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"]),
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L"]) {
     position: relative;
-    background-color: #ffffff;
-    border-radius: 8px;
+    background-color: #222222;
+    border-radius: 0;
     width: 40px;
     height: 40px;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid #e0e0e0;
+    border: 1px solid #444444;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     transition: all 0.2s ease;
     cursor: pointer;
@@ -420,7 +453,7 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"])::b
     position: absolute;
     width: 18px;
     height: 18px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='4' y1='12' x2='20' y2='12'%3E%3C/line%3E%3Cline x1='4' y1='6' x2='20' y2='6'%3E%3C/line%3E%3Cline x1='4' y1='18' x2='20' y2='18'%3E%3C/line%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e0e0e0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='4' y1='12' x2='20' y2='12'%3E%3C/line%3E%3Cline x1='4' y1='6' x2='20' y2='6'%3E%3C/line%3E%3Cline x1='4' y1='18' x2='20' y2='18'%3E%3C/line%3E%3C/svg%3E");
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center;
@@ -432,7 +465,7 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L
     position: absolute;
     width: 18px;
     height: 18px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'%3E%3C/line%3E%3Cline x1='6' y1='6' x2='18' y2='18'%3E%3C/line%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e0e0e0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'%3E%3C/line%3E%3Cline x1='6' y1='6' x2='18' y2='18'%3E%3C/line%3E%3C/svg%3E");
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center;
@@ -441,14 +474,14 @@ button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L
 /* Subtle hover effects */
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"]):hover,
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L"]):hover {
-    background-color: #f5f5f5;
+    background-color: #333333;
     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
 /* Subtle active/pressed state */
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M10 6L"]):active,
 button[data-testid="stBaseButton-headerNoPadding"]:has(svg path[d^="M15.41 7.41L"]):active {
-    background-color: #eeeeee;
+    background-color: #444444;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
@@ -458,16 +491,16 @@ section[data-testid="stFileUploaderDropzone"] {
     flex-direction: row;
     align-items: center; /* Vertically center items in the row */
     justify-content: space-between; /* Push instructions and button apart */
-    border: 2px dashed #e0e0e0; /* Light dashed border */
-    border-radius: 8px;
+    border: 2px dashed #444444; /* Light dashed border */
+    border-radius: 0;
     padding: 20px; /* Adjusted padding */
-    background-color: #f9f9f9; /* Very light gray background */
+    background-color: #1e1e1e; /* Very light gray background */
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 section[data-testid="stFileUploaderDropzone"]:hover {
-    background-color: #f0f0f0; /* Slightly darker on hover */
-    border-color: #cccccc; /* Darker border on hover */
+    background-color: #2a2a2a; /* Slightly darker on hover */
+    border-color: #666666; /* Darker border on hover */
 }
 
 /* Hide default Streamlit icon if a new one is preferred or for cleaner look */
@@ -477,7 +510,7 @@ section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-nwtri {
 }
 
 section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-nwtri svg {
-    fill: #555555; /* Darker gray for the icon */
+    fill: #cccccc; /* Darker gray for the icon */
     width: 48px; /* Adjust icon size */
     height: 48px;
 }
@@ -485,7 +518,7 @@ section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-nwtri svg {
 /* Styling for the "Drag and drop file here" text */
 section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-9ycgxx {
     font-size: 1.1em; /* Larger text */
-    color: #333333; /* Darker text color */
+    color: #e0e0e0; /* Darker text color */
     font-weight: 500; /* Slightly bolder */
     display: block; /* Ensure it takes full width for centering */
     margin-bottom: 6px;
@@ -494,15 +527,15 @@ section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-9ycgxx {
 /* Styling for the "Limit 200MB per file..." text */
 section[data-testid="stFileUploaderDropzone"] .st-emotion-cache-1rpn56r {
     font-size: 0.85em; /* Smaller text */
-    color: #777777; /* Lighter gray for subtext */
+    color: #aaaaaa; /* Lighter gray for subtext */
 }
 
 /* Styling for the "Browse files" button */
 section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"] {
-    background-color: #ffffff; /* White background */
-    color: #333333; /* Dark text */
-    border: 1px solid #cccccc; /* Light gray border */
-    border-radius: 6px;
+    background-color: #333333; /* White background */
+    color: #ffffff; /* Dark text */
+    border: 1px solid #555555; /* Light gray border */
+    border-radius: 0;
     padding: 8px 18px; /* Adjust padding */
     font-weight: 500;
     margin-top: 0; /* Remove top margin as it's now side-by-side */
@@ -511,14 +544,14 @@ section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-s
 }
 
 section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]:hover {
-    background-color: #f0f0f0; /* Light gray on hover */
-    border-color: #bbbbbb;
-    color: #000000;
+    background-color: #444444; /* Light gray on hover */
+    border-color: #777777;
+    color: #ffffff;
 }
 
 section[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]:active {
-    background-color: #e0e0e0; /* Darker gray on active/press */
-    border-color: #aaaaaa;
+    background-color: #555555; /* Darker gray on active/press */
+    border-color: #888888;
 }
 
 /* Make the instructions container flex for better alignment */
@@ -536,16 +569,16 @@ div[data-testid="stFileUploaderFile"] {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    border-radius: 8px; /* Consistent with dropzone */
-    background-color: #f9f9f9; /* Consistent light background */
+    border-radius: 0; /* Consistent with dropzone */
+    background-color: #2a2a2a; /* Consistent light background */
     margin-top: 12px; /* Space above the pill */
-    border: 1px solid #e0e0e0; /* Consistent border */
+    border: 1px solid #444444; /* Consistent border */
     box-shadow: 0 1px 2px rgba(0,0,0,0.04); /* Subtle shadow */
 }
 
 /* Icon within the file pill */
 div[data-testid="stFileUploaderFile"] > div:first-child svg { /* Targets the icon container's SVG */
-    fill: #555555; /* Same as dropzone icon color */
+    fill: #cccccc; /* Same as dropzone icon color */
     width: 20px;
     height: 20px;
 }
@@ -563,7 +596,7 @@ div[data-testid="stFileUploaderFile"] .stFileUploaderFileData {
 /* Filename style */
 div[data-testid="stFileUploaderFileName"] {
     font-weight: 500; /* Medium weight for filename */
-    color: #333333; /* Darker text */
+    color: #e0e0e0; /* Darker text */
     white-space: nowrap; /* Prevent filename from wrapping */
     overflow: hidden; /* Hide overflow if too long */
     text-overflow: ellipsis; /* Show ... for long filenames */
@@ -574,7 +607,7 @@ div[data-testid="stFileUploaderFileName"] {
 /* File size style */
 div[data-testid="stFileUploaderFile"] .stFileUploaderFileData > small {
     font-size: 0.8em; /* Slightly smaller size text */
-    color: #777777; /* Lighter gray for size */
+    color: #aaaaaa; /* Lighter gray for size */
     white-space: nowrap; /* Prevent size from wrapping */
     flex-shrink: 0; /* Prevent size from shrinking if filename is very long */
 }
@@ -587,11 +620,11 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-minimal"]:hover {
-    background-color: #e0e0e0; /* Hover effect for delete button */
+    background-color: #444444; /* Hover effect for delete button */
 }
 
 div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-minimal"] svg {
-    fill: #555555; /* Icon color */
+    fill: #cccccc; /* Icon color */
     width: 16px; /* Adjust size */
     height: 16px;
 }
@@ -611,14 +644,14 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 
 /* Badge for CPU info */
 .cpu-info-badge {
-    background-color: #fdf2f2; /* Light red background similar to model badge style */
-    color: #b91c1c; /* Dark red text for contrast */
+    background-color: #2a1a1a; /* Light red background similar to model badge style */
+    color: #ff8a8a; /* Dark red text for contrast */
     padding: 5px 12px;
-    border-radius: 15px;
-    font-family: 'Inter', sans-serif;
+    border-radius: 0;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 500;
-    border: 1px solid #fca5a5; /* Soft red border */
+    border: 1px solid #7c2d2d; /* Soft red border */
     display: flex;
     align-items: center;
 }
@@ -642,8 +675,8 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     background-color: #f0f4f8;
     color: #1f2937;
     padding: 5px 12px;
-    border-radius: 15px;
-    font-family: 'Inter', sans-serif;
+    border-radius: 0;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 500;
     border: 1px solid #d0d7de;
@@ -652,15 +685,15 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 .model-status-badge.success {
-    background-color: #e6f7ed;
-    color: #1a7f37;
-    border-color: #a3d9b1;
+    background-color: #1a2b22;
+    color: #99ffc2;
+    border-color: #004d1a;
 }
 
 .model-status-badge.warning {
-    background-color: #fff8e1;
-    color: #856404;
-    border-color: #ffd6a5;
+    background-color: #3b2e00;
+    color: #ffd6a5;
+    border-color: #856404;
 }
 
 .status-indicator {
@@ -671,11 +704,11 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 .status-indicator.success {
-    background-color: #1a7f37;
+    background-color: #99ffc2;
 }
 
 .status-indicator.warning {
-    background-color: #856404;
+    background-color: #ffd6a5;
 }
 
 /* === Footer Redesign === */
@@ -689,26 +722,24 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 }
 
 .custom-footer {
-    padding: 2.5rem 1.5rem;
+    padding: 1.5rem 1.5rem;
     text-align: center;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 3rem;
+    margin-top: 1.5rem;
     position: relative;
-    border-radius: 16px;
+    border-radius: 0;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 
     border: 2px solid transparent;
-    background-image: linear-gradient(var(--app-bg, #ffffff), var(--app-bg, #ffffff)),
+    background-image: linear-gradient(var(--app-bg, #121212), var(--app-bg, #121212)),
         linear-gradient(90deg,
-            #ff0066,
-            #ff8c00,
-            #ffd500,
+            #00ff7f,
             #00c853,
-            #00bcd4,
             #3f51b5,
             #d500f9,
-            #ff0066
+            #ff0066,
+            #00ff7f
         );
     background-origin: border-box;
     background-clip: padding-box, border-box;
@@ -743,10 +774,10 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     align-items: center;
     gap: 0.6rem;
     padding: 10px 18px;
-    border-radius: 10px;
+    border-radius: 0;
     background-color: var(--secondary-button-bg);
     border: 1px solid var(--secondary-button-border);
-    color: #444;
+    color: #cccccc;
     text-decoration: none !important;
     font-weight: 500;
     font-size: 0.95em;
@@ -762,7 +793,7 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 .footer-icon {
     width: 20px;
     height: 20px;
-    fill: #555;
+    fill: #cccccc;
     transition: fill 0.2s ease;
 }
 
@@ -806,12 +837,12 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     left: 50%;
     transform: translateX(-50%);
     
-    background-color: #333;
+    background-color: #111;
     color: #fff;
     padding: 8px 12px;
-    border-radius: 6px;
+    border-radius: 0;
     font-size: 0.9em;
-    font-family: 'Inter', sans-serif;
+    font-family: 'JetBrains Mono', monospace;
     white-space: normal; /* Allow wrapping */
     width: 220px; /* Set a max-width */
     text-align: center;
@@ -827,110 +858,26 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
     visibility: visible;
 }
 
-/* === Pac-Man Loader Styles === */
-.pacman-loader {
-    width: 50px;
-    height: 50px;
-    position: relative;
-    transform: rotate(0deg); 
-}
-
-.pacman-top, .pacman-bottom {
-    background-color: #FFCA28; /* brighter Pac-Man yellow */
-    height: 25px;
-    width: 50px;
-    position: absolute;
-    left: 0;
-    z-index: 2; /* sit above dots */
-}
-
-.pacman-top {
-    top: 0;
-    border-radius: 25px 25px 0 0;
-    transform-origin: bottom center;
-    animation: pacman-chomp-top 0.6s infinite linear;
-}
-
-.pacman-bottom {
-    bottom: 0;
-    border-radius: 0 0 25px 25px;
-    transform-origin: top center;
-    animation: pacman-chomp-bottom 0.6s infinite linear;
-}
-
-@keyframes pacman-chomp-top {
-    0%, 100% { transform: rotate(0deg); }
-    50% { transform: rotate(-40deg); }
-}
-
-@keyframes pacman-chomp-bottom {
-    0%, 100% { transform: rotate(0deg); }
-    50% { transform: rotate(40deg); }
-}
-
-/* Update electron dot styling */
-.pacman-loader .pacman-dot {
-    position: absolute;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    top: 18px; /* vertically centered ( (50-14)/2 ) */
-    left: 80px; /* start a bit further right so travel is longer */
-    background: radial-gradient(circle at 30% 30%, #ffffff 0 20%, #30d7ff 25% 70%, #0077ff 75% 100%);
-    box-shadow: 0 0 6px rgba(0, 136, 255, 0.7), 0 0 10px rgba(0,136,255,0.4);
-    animation: pacman-electron-move 2s infinite linear;
-    z-index: 1; /* behind Pac-Man */
-}
-
-/* minus sign on each electron */
-.pacman-loader .pacman-dot::after {
-    content: "−"; /* minus sign */
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 10px;
-    font-weight: 700;
-    color: #ffffff;
-}
-
-/* stagger delays remain */
-.pacman-loader .pacman-dot:nth-child(3) { animation-delay: 0s; }
-.pacman-loader .pacman-dot:nth-child(4) { animation-delay: 0.4s; }
-.pacman-loader .pacman-dot:nth-child(5) { animation-delay: 0.8s; }
-.pacman-loader .pacman-dot:nth-child(6) { animation-delay: 1.2s; }
-
-/* Override electron animation for better timing */
-@keyframes pacman-electron-move {
-    0%   { transform: translateX(0) scale(1);   opacity: 1; }
-    60%  { transform: translateX(-55px) scale(1); opacity: 1; }
-    70%  { transform: translateX(-60px) scale(1.3,0.6); opacity: 0.9; }
-    80%  { transform: translateX(-65px) scale(0.4,1.4); opacity: 0.4; }
-    100% { transform: translateX(-70px) scale(0);        opacity: 0; }
-}
-
 /* === Custom Tab Styles === */
 
 /* The tab bar container */
 div[data-testid="stTabs"] > div[role="tablist"] {
-    border-bottom: 2px solid var(--subtle-border-color);
-    padding-bottom: 0;
+    border-bottom: none; /* remove the underline from the container */
+    gap: 8px; /* use flex gap for spacing */
     margin-bottom: 24px;
 }
 
 /* Individual tab buttons */
 div[data-testid="stTabs"] button[data-baseweb="tab"] {
-    background-color: transparent;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: #555;
-    padding: 10px 4px; /* Reduced side padding, let margin handle spacing */
-    margin: 0 12px; /* Spacing between tabs */
-    margin-bottom: -2px; /* Align underline with container border */
+    background-color: var(--secondary-button-bg);
+    border: 1px solid var(--secondary-button-border);
+    color: var(--text-color);
+    padding: 8px 16px;
+    margin: 0;
     font-weight: 500;
-    font-size: 1.05em;
+    font-size: 0.9em;
     transition: all 0.2s ease-in-out;
-    border-radius: 0; /* Remove default radius, rely on underline */
+    border-radius: 0; /* Sharp corners */
 }
 
 /* Remove left padding from the very first tab */
@@ -940,16 +887,17 @@ div[data-testid="stTabs"] button[data-baseweb="tab"]:first-child {
 
 /* Hover effect for inactive tabs */
 div[data-testid="stTabs"] button[data-baseweb="tab"]:hover:not([aria-selected="true"]) {
-    background-color: rgba(0, 112, 243, 0.05);
-    color: var(--primary-color);
-    border-radius: 6px 6px 0 0;
+    background-color: var(--secondary-button-hover-bg);
+    border-color: var(--secondary-button-hover-border);
+    color: #fff;
 }
 
 /* Style for the currently selected tab */
 div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
-    color: var(--primary-color);
+    background-color: var(--primary-color);
+    color: var(--primary-text-color);
+    border-color: var(--primary-color);
     font-weight: 600;
-    border-bottom-color: var(--primary-color);
 }
 
 /* === Responsive Tab Styles for Mobile === */
@@ -973,19 +921,82 @@ div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
 
     /* Create the fade effect on the main non-scrolling parent */
     div[data-testid="stTabs"]::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        right: 0;
-        width: 60px; /* Width of the fade */
-        height: 48px; /* Height to cover the tab bar, not content below */
-        background: linear-gradient(to left, var(--app-bg) 40%, hsla(0, 0%, 100%, 0));
-        pointer-events: none; /* Let clicks pass through to the tabs */
-        z-index: 2; /* Position it above the tabs */
+        content: none;
     }
 
     /* Prevent individual tabs from shrinking, forcing them to overflow */
     div[data-testid="stTabs"] button[data-baseweb="tab"] {
         flex-shrink: 0;
+    }
+}
+
+/* New Custom Loader for Analysis Popup */
+.analysis-loader {
+    position: relative;
+    width: 75px;
+    height: 100px;
+    background-repeat: no-repeat;
+    background-image: linear-gradient(var(--secondary-button-border) 50px, transparent 0),
+                      linear-gradient(var(--secondary-button-border) 50px, transparent 0),
+                      linear-gradient(var(--secondary-button-border) 50px, transparent 0),
+                      linear-gradient(var(--secondary-button-border) 50px, transparent 0),
+                      linear-gradient(var(--secondary-button-border) 50px, transparent 0);
+    background-size: 8px 100%;
+    background-position: 0px 90px, 15px 78px, 30px 66px, 45px 58px, 60px 50px;
+    animation: pillerPushUp 4s linear infinite;
+}
+
+.analysis-loader:after {
+    content: '';
+    position: absolute;
+    bottom: 10px;
+    left: 0;
+    width: 10px;
+    height: 10px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    animation: ballStepUp 4s linear infinite;
+}
+
+@keyframes pillerPushUp {
+  0% , 40% , 100%{background-position: 0px 90px, 15px 78px, 30px 66px, 45px 58px, 60px 50px}
+  50% ,  90% {background-position: 0px 50px, 15px 58px, 30px 66px, 45px 78px, 60px 90px}
+}
+
+@keyframes ballStepUp {
+  0% {transform: translate(0, 0)}
+  5% {transform: translate(8px, -14px)}
+  10% {transform: translate(15px, -10px)}
+  17% {transform: translate(23px, -24px)}
+  20% {transform: translate(30px, -20px)}
+  27% {transform: translate(38px, -34px)}
+  30% {transform: translate(45px, -30px)}
+  37% {transform: translate(53px, -44px)}
+  40% {transform: translate(60px, -40px)}
+  50% {transform: translate(60px, 0)}
+  57% {transform: translate(53px, -14px)}
+  60% {transform: translate(45px, -10px)}
+  67% {transform: translate(37px, -24px)}
+  70% {transform: translate(30px, -20px)}
+  77% {transform: translate(22px, -34px)}
+  80% {transform: translate(15px, -30px)}
+  87% {transform: translate(7px, -44px)}
+  90% {transform: translate(0, -40px)}
+  100% {transform: translate(0, 0);}
+}
+
+@media (max-width: 768px) {
+    .loader-popup-content {
+        width: 85vw;
+        min-width: 0;
+        padding: 30px 20px;
+    }
+    
+    .loader-popup-text {
+        font-size: 1em !important; /* Override inline style */
+    }
+
+    .custom-footer {
+        padding: 2rem 1rem;
     }
 }

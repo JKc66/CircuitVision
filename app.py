@@ -275,16 +275,15 @@ else:
 
 
 # Main content  
-st.image("static/images/sdp_banner.png", use_container_width=True)
+st.image("static/images/sdp_banner_black.png", use_container_width=True)
 
 # File upload section
 file_upload_container = st.container()
 with file_upload_container:
     uploaded_file = st.file_uploader(
-        "Drag and drop your circuit diagram here",
+        "Upload a circuit diagram to get started",
         type=['png', 'jpg', 'jpeg'],
         help="""
-        **Limitations:**
         - Supports AC/DC linear circuits.
         - Dependent components are not yet supported.
         """
@@ -317,15 +316,8 @@ if st.session_state.get('start_analysis_triggered', False):
                 st.markdown("""
                     <div class="loader-popup-overlay">
                         <div class="loader-popup-content">
-                            <div class="pacman-loader">
-                                <div class='pacman-top'></div>
-                                <div class='pacman-bottom'></div>
-                                <div class="pacman-dot"></div>
-                                <div class="pacman-dot"></div>
-                                <div class="pacman-dot"></div>
-                                <div class="pacman-dot"></div>
-                            </div>
-                            <p style="text-align: center; margin-top: 15px; font-size: 1.1em; color: #333;">Analyzing... 15 - 20 seconds</p>
+                            <div class="analysis-loader"></div>
+                            <p class="loader-popup-text" style="text-align: center; margin-top: 15px; font-size: 1.1em; color: var(--text-color);">Analyzing... 15 - 20 seconds</p>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -427,10 +419,10 @@ if st.session_state.active_results['original_image'] is not None:
 
     # Create tabs for the results
     tab_titles = [
-        "🔎 Overview & Components",
+        "🔎 Overview",
         "🔗 Node Analysis",
         "📝 Netlist",
-        "⚡ SPICE Simulation"
+        "⚡ Simulation"
     ]
     tab1, tab2, tab3, tab4 = st.tabs(tab_titles)
 
@@ -439,7 +431,7 @@ if st.session_state.active_results['original_image'] is not None:
         
         # Display analysis time if available
         if 'elapsed_time' in st.session_state.active_results:
-            expander_label = f"⏱️ Analysis Time: {st.session_state.active_results['elapsed_time']:.2f}s (Expand for step details)"
+            expander_label = f"⏱️ Analysis Time: `{st.session_state.active_results['elapsed_time']:.2f}s` (Expand for step details)"
             st.markdown("<div class='detailed-timings-expander'>", unsafe_allow_html=True)
             with st.expander(expander_label):
                 detailed_timings = st.session_state.active_results.get('detailed_timings')
@@ -450,7 +442,7 @@ if st.session_state.active_results['original_image'] is not None:
                     max_duration = max(durations) if durations else 1
 
                     def get_color_for_duration(duration, min_d, max_d):
-                        """Calculates an HSL color from green to red based on duration."""
+                        """Calculates an HSL color from green to red based on duration for a dark theme."""
                         if max_d == min_d:
                             normalized = 0.5
                         else:
@@ -461,15 +453,15 @@ if st.session_state.active_results['original_image'] is not None:
                         hue = 120 * (1 - normalized)
                         hue = max(0, min(hue, 120)) # Clamp hue
                         
-                        # Use pastel-like saturation and lightness
-                        return f"hsl({hue}, 70%, 85%)"
+                        # Use lower lightness for dark backgrounds
+                        return f"hsl({hue}, 60%, 25%)"
 
                     # Build an HTML table with inline styles for row colors
                     table_html = """
                     <style>
-                        .timing-table { width: 100%; border-collapse: collapse; }
-                        .timing-table th, .timing-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-                        .timing-table th { background-color: #f2f2f2; }
+                        .timing-table { width: 100%; border-collapse: collapse; color: var(--text-color); }
+                        .timing-table th, .timing-table td { padding: 8px; text-align: left; border-bottom: 1px solid #444; }
+                        .timing-table th { background-color: #2a2a2a; }
                     </style>
                     <table class='timing-table'>
                         <tr><th>Step</th><th>Duration (s)</th></tr>
@@ -594,10 +586,17 @@ if st.session_state.active_results['original_image'] is not None:
                             })
                         
                         if stats_data:
-                            st.table(stats_data)
+                            # Render as an HTML table for custom styling
+                            table_html = "<div class='component-stats-table'><table>"
+                            table_html += "<thead><tr><th>Component</th><th>N</th><th>Avg Conf</th></tr></thead>"
+                            table_html += "<tbody>"
+                            for item in sorted(stats_data, key=lambda x: x['Component']):
+                                table_html += f"<tr><td>{item['Component']}</td><td>{item['N']}</td><td>{item['Avg Conf']}</td></tr>"
+                            table_html += "</tbody></table></div>"
+                            st.markdown(table_html, unsafe_allow_html=True)
                 
                 # Expander for Initial YOLO Detections (on original image)
-                with st.expander("🔍 Debug: Initial YOLO Detections (Original Image)"):
+                with st.expander("🔍 Debug: Original Image"):
                     if 'bboxes_orig_coords_nms' in st.session_state.active_results and \
                        st.session_state.active_results['bboxes_orig_coords_nms'] is not None and \
                        'original_image' in st.session_state.active_results and \
@@ -614,7 +613,7 @@ if st.session_state.active_results['original_image'] is not None:
                         st.info("Initial YOLO detection data or original image not available in session state.")
 
                 # Expander for LLaMA Stage 1 (Direction) Debug Output
-                with st.expander("↗️ Debug: VLM Directions"):
+                with st.expander("↗️ Debug: Source Directions"):
                     # Check prerequisites first
                     if 'bboxes' not in st.session_state.active_results or not st.session_state.active_results.get('bboxes'):
                         st.info("Processed component bounding boxes ('bboxes') not available in session state. Run analysis first.")
@@ -624,7 +623,7 @@ if st.session_state.active_results['original_image'] is not None:
                         st.info("VLM debug: No input images were stored by the analyzer for VLM processing. Check component types or analyzer logic if images were expected.")
                     else:
                         # This is the success case: bboxes exist, attribute exists, and dict is not empty
-                        st.success("✅")
+                        st.success("✅ Directions found")
                         
                         found_at_least_one_image_to_display = False
                         for comp_bbox in st.session_state.active_results['bboxes']:
@@ -648,8 +647,8 @@ if st.session_state.active_results['original_image'] is not None:
                                 # Add tooltip to the semantic_direction part
                                 tooltip_text = "The direction (e.g., UP, DOWN) indicates the direction of conventional current flow, inferred from visual cues like arrows or polarity signs (+/-)."
                                 output_line = (
-                                    f"{yolo_class} <code data-tooltip='{tooltip_text}'>{semantic_direction}</code> ; "
-                                    f"<code>{semantic_reason}</code> &#8594; <code>{interpreted_type}</code>"
+                                    f"<div class='source-direction-output'>{yolo_class} <code data-tooltip='{tooltip_text}'>{semantic_direction}</code> ; "
+                                    f"<code>{semantic_reason}</code> &#8594; <code>{interpreted_type}</code></div>"
                                 )
                                 
                                 st.image(vlm_input_image, width=100)
@@ -665,7 +664,6 @@ if st.session_state.active_results['original_image'] is not None:
     with tab2:
         # Step 2: Node Analysis
         if st.session_state.active_results['contour_image'] is not None or st.session_state.active_results['sam2_output'] is not None:
-            st.markdown("## 🔗 Node Analysis")
             
             col1, col2 = st.columns(2)
             
@@ -704,7 +702,6 @@ if st.session_state.active_results['original_image'] is not None:
         # Step 3: Netlist
         if st.session_state.active_results.get('netlist_text') is not None:
             # Modified layout to align column sizes better
-            st.markdown("## 📝 Circuit Netlist")
             
             # Create columns for button and loader with a better ratio
             btn_col, loader_col = st.columns([4, 1])
@@ -801,7 +798,6 @@ if st.session_state.active_results['original_image'] is not None:
             st.info("Netlist not available. Please run the analysis.")
 
     with tab4:
-        st.markdown("## ⚡ SPICE Analysis")
         # Only show SPICE analysis options AFTER the final netlist is generated
         if st.session_state.get('final_netlist_generated', False):
             # Initialize session state for analysis_mode and ac_frequency if not present
@@ -850,10 +846,10 @@ if st.session_state.active_results['original_image'] is not None:
                     if is_ac_source_for_this_line:
                         determined_analysis_mode = "AC (.ac)"
                         break # Found an AC source line, break outer (netlist_lines) loop
-            
+            # Auto-detected Analysis Type
             st.session_state.analysis_mode = determined_analysis_mode
             
-            st.markdown(f"**Auto-detected Analysis Type:** `{st.session_state.analysis_mode}`")
+            st.markdown(f"**Analysis Type:** `{st.session_state.analysis_mode}`")
 
             ac_frequency_hz = None
             if st.session_state.analysis_mode == "AC (.ac)":
@@ -903,7 +899,7 @@ footer_html = """
     </a>
     <a href='https://github.com/JKc66/CircuitVision' target='_blank' rel='noopener noreferrer' class='footer-link'>
       <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="footer-icon github-icon"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-      <span>CircuitVision on GitHub</span>
+      <span>CircuitVision</span>
     </a>
   </div>
 </div>

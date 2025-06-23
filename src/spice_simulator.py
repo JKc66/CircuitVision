@@ -260,9 +260,9 @@ def perform_ac_spice_analysis(active_results_data, analyzer_instance, current_ac
                 st.markdown("### Branch Currents (AC)")
                 st.json(branch_currents_ac_display)
 
-            st.markdown("### AC Analysis Plots")
-            plot_tabs = st.tabs(["Phasor Diagram"])
-            with plot_tabs[0]:
+            # If analysis is successful, display the results
+            if analysis_ac:
+                st.markdown("### AC Analysis Plots")
                 try:
                     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), subplot_kw={'projection': 'polar'})
                     max_v_mag = 0
@@ -272,7 +272,12 @@ def perform_ac_spice_analysis(active_results_data, analyzer_instance, current_ac
                             mag, angle = np.abs(complex_val), np.angle(complex_val)
                             max_v_mag = max(max_v_mag, mag)
                             ax1.plot([0, angle], [0, mag], label=f'V({node})', marker='o', linewidth=2)
-                    ax1.set_title('Voltage Phasors'); ax1.set_rmax(max_v_mag * 1.2 if max_v_mag > 0 else 1); ax1.grid(True); ax1.legend()
+                    ax1.set_title('Voltage Phasors')
+                    ax1.set_rmax(max_v_mag * 1.2 if max_v_mag > 0 else 1)
+                    ax1.grid(True)
+                    ax1.legend()
+                    ax1.set_xlabel('Phase (degrees)')
+                    ax1.set_ylabel('Magnitude (V)')
                     
                     max_i_mag = 0
                     for branch, val_waveform in analysis_ac.branches.items():
@@ -281,9 +286,17 @@ def perform_ac_spice_analysis(active_results_data, analyzer_instance, current_ac
                             mag, angle = np.abs(complex_val), np.angle(complex_val)
                             max_i_mag = max(max_i_mag, mag)
                             ax2.plot([0, angle], [0, mag], label=str(branch), marker='o', linewidth=2)
-                    ax2.set_title('Current Phasors'); ax2.set_rmax(max_i_mag * 1.2 if max_i_mag > 0 else 1); ax2.grid(True); ax2.legend()
+                    ax2.set_title('Current Phasors')
+                    ax2.set_rmax(max_i_mag * 1.2 if max_i_mag > 0 else 1)
+                    ax2.grid(True)
+                    ax2.legend()
+                    ax2.set_xlabel('Phase (degrees)')
+                    ax2.set_ylabel('Magnitude (A)')
                     
-                    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    st.caption("Phasor diagram showing voltage and current magnitudes and phase angles.")
+                    plt.close(fig)
                 except Exception as e_plot:
                     st.error(f"Error generating phasor plots: {str(e_plot)}")
         else:
