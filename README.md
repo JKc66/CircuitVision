@@ -35,7 +35,7 @@
   - [🚀 Overview](#-overview)
   - [✨ Key Features \& The Engineering Behind Them](#-key-features--the-engineering-behind-them)
     - [👁️ Advanced Component Detection (Fine-Tuned YOLOv11)](#️-advanced-component-detection-fine-tuned-yolov11)
-    - [📐 Precise Circuit Segmentation \& Intelligent Cropping (Adapted SAM 2)](#-precise-circuit-segmentation--intelligent-cropping-adapted-sam-2)
+    - [📐 Intelligent Cropping \& Precise Segmentation (YOLO + SAM 2)](#-intelligent-cropping--precise-segmentation-yolo--sam-2)
     - [🔗 Custom-Developed Node \& Connection Analysis](#-custom-developed-node--connection-analysis)
     - [📝 Automated \& Enriched Netlist Generation](#-automated--enriched-netlist-generation)
     - [🖥️ Intuitive User Interface \& Rich Visualization](#️-intuitive-user-interface--rich-visualization)
@@ -54,18 +54,21 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 ## ✨ Key Features & The Engineering Behind Them
 
 <p align="center">
-  <img width="100%" src="static/images/workflow_diagram.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase1.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase2.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase3.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase4.png" />
 </p>
-<p align="center"><i>Overall workflow of the CircuitVision project.</i></p>
+<p align="center"><i>The four phases of the CircuitVision pipeline: Detection, Topology Analysis, Netlist Generation, and Simulation.</i></p>
 
 ### 👁️ Advanced Component Detection (Fine-Tuned YOLOv11)
 * Utilizes a **YOLOv11 model fine-tuned specifically on electrical circuit component datasets**. This training enables robust identification of diverse **electrical components** even in complex or noisy images. **We obtained a mean average percision (mAp-50) of 0.9313, which is on bar with SOTA detection models.**
 * Employs Non-Maximum Suppression (NMS) based on confidence scores to eliminate redundant detections, ensuring a clean and precise component map.
-* Bounding boxes are re-calculated and validated post-SAM2 cropping to maintain accuracy on the precisely segmented region of interest.
+* Bounding boxes are re-calculated and adjusted after the initial crop to maintain coordinate accuracy relative to the new, focused region of interest.
 
-### 📐 Precise Circuit Segmentation & Intelligent Cropping (Adapted SAM 2)
-* Integrates an innovatively fine-tuned large foundation model, **Segment Anything Model 2 (SAM 2)** on a very small dataset (267 images) to achieve highly detailed segmentation, accurately isolating the primary **circuit diagram area** from its background. **Obtaining an Accuracy of 98.7%**.  (This work will be submitted to a journal soon).
-* The input image and the SAM 2 binary mask are intelligently cropped based on the segmented circuit's extent (with optimal padding). This crucial step focuses all subsequent analyses (node detection, value extraction) solely on the relevant circuit area, significantly boosting performance and reducing noise.
+### 📐 Intelligent Cropping & Precise Segmentation (YOLO + SAM 2)
+* **Intelligent YOLO-Based Cropping:** Before segmentation, the application performs an intelligent crop based on the collective bounding box of all components detected by YOLO. This crucial first step isolates the relevant circuit area, significantly boosting the performance and accuracy of subsequent steps by removing background noise.
+* **Precise Segmentation with SAM 2:** After cropping, a fine-tuned **Segment Anything Model 2 (SAM 2)** is applied to the focused circuit area. This generates a highly detailed binary mask of the conductive traces, which is essential for accurate node and connection analysis. Our fine-tuned SAM 2 model achieves **98.7% accuracy** on circuit segmentation from a small dataset of only 267 images. (This work will be submitted to a journal soon).
 
 
 ### 🔗 Custom-Developed Node & Connection Analysis
