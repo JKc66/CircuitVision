@@ -97,8 +97,6 @@ CircuitVision is the culmination of significant research and development in appl
 *   **Algorithm Development:** The node analysis and corner detection algorithms are **custom-built** for the unique challenges of **electrical circuit diagrams**.
 *   **Multi-Model Orchestration:** Integrating YOLO, SAM 2, and Gemini into a cohesive and efficient pipeline represents a complex engineering achievement.
 
-For a detailed history of changes, technical deep-dives, and specific commit references, please refer to our **[CHANGELOG.md](./CHANGELOG.md)**.
-
 ## 🛠️ Setup
 
 1.  **Models & API Access:**
