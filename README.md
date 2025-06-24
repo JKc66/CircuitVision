@@ -148,7 +148,7 @@ For a consistent and isolated environment, we recommend using Docker.
     *   Generate the initial structural netlist.
     *   Query Gemini for component values and types.
     *   Produce the final, enriched netlist.
-    *   
+    
 ## 🧠 Training Code
 
 Explore the core training pipelines used to build the intelligence behind CircuitVision:
@@ -156,12 +156,16 @@ Explore the core training pipelines used to build the intelligence behind Circui
 * **🟪 SAM 2 Training**
   Custom training notebook for **Segment Anything Model 2**, tailored specifically for electrical circuit segmentation.
   
-  📎 [View on Kaggle](https://www.kaggle.com/code/mah01sam/training-sam-2/notebook?scriptVersionId=237405492)
+  [![Open in Kaggle](https://img.shields.io/badge/Open%20in%20Kaggle-20BEFF?logo=kaggle&logoColor=fff)](https://www.kaggle.com/code/mah01sam/training-sam-2/notebook?scriptVersionId=237405492)
+
+
+  </a>
 
 * **🟧 YOLOv11 Training**
   End-to-end training and inference pipeline for detecting circuit elements with **YOLOv11**.
-
-  📎 [View on Kaggle](https://www.kaggle.com/code/mah01sam/yolov11-training-and-project-pipeline)
+  
+  [![Open in Kaggle](https://img.shields.io/badge/Open%20in%20Kaggle-20BEFF?logo=kaggle&logoColor=fff)](https://www.kaggle.com/code/mah01sam/yolov11-training-and-project-pipeline)
+ 
 
 ---
 
