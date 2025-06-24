@@ -115,8 +115,6 @@ For a detailed history of changes, technical deep-dives, and specific commit ref
     pip install -r requirements.txt
     ```
 
-3.  **Configuration:** Review `config.py` (or relevant configuration files) for any paths or settings that might need adjustment for your environment, though defaults should work if models are downloaded as per step 1.
-
 ### 🐳 Using Docker (Recommended)
 
 For a consistent and isolated environment, we recommend using Docker.
@@ -127,26 +125,16 @@ For a consistent and isolated environment, we recommend using Docker.
     docker build -t circuitvision .
     ```
 
-2.  **Run with Docker Compose (if `docker-compose.yml` is provided):**
+2.  **Run with Docker Compose (`docker-compose.yml`):**
     This is often the simplest way to manage multi-container applications or complex setups.
     ```bash
-    docker-compose up --build
+    docker compose up --build
     ```
     To run in detached mode:
     ```bash
-    docker-compose up -d --build
+    docker compose up -d --build
     ```
     *(Ensure your `GEMINI_API_KEY` is available to the Docker environment, e.g., via an `.env` file used by Docker Compose or by passing it as an environment variable in the `docker-compose.yml`)*
-
-3.  **Run the Docker Container Manually:**
-    ```bash
-    docker run -p 8501:8501 \
-               -v ./models:/app/models \
-               -e GEMINI_API_KEY="YOUR_API_KEY" \
-               circuitvision
-    ```
-    *Adjust port mappings, volume mounts (`-v`), and environment variables (`-e`) as needed.*
-    *The `download_models.py` script can also be run inside the Docker container if models are not mounted from the host.*
 
 ## 🚀 Usage
 
@@ -160,9 +148,7 @@ For a consistent and isolated environment, we recommend using Docker.
     *   Generate the initial structural netlist.
     *   Query Gemini for component values and types.
     *   Produce the final, enriched netlist.
-4.  **Review Results:** Explore the visualizations, component statistics, timing data, and the generated netlists directly in the UI.
-5.  **Simulate:** Copy the final netlist for use in your preferred SPICE simulation software.
-
+    *   
 ## 🧠 Training Code
 
 Explore the core training pipelines used to build the intelligence behind CircuitVision:
