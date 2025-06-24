@@ -54,10 +54,10 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 ## ✨ Key Features & The Engineering Behind Them
 
 <p align="center">
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase1.png" />
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase2.png" />
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase3.png" />
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase4.png" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase1.png" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase2.png" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase3.png" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase4.png" />
 </p>
 <p align="center"><i>The four phases of the CircuitVision pipeline: Detection, Topology Analysis, Netlist Generation, and Simulation.</i></p>
 
@@ -163,7 +163,7 @@ Explore the core training pipelines used to build the intelligence behind Circui
 
 * **🟧 YOLOv11 Training**
   End-to-end training and inference pipeline for detecting circuit elements with **YOLOv11**.
-  
+
   [![Open in Kaggle](https://img.shields.io/badge/Open%20in%20Kaggle-20BEFF?logo=kaggle&logoColor=fff)](https://www.kaggle.com/code/mah01sam/yolov11-training-and-project-pipeline)
  
 
