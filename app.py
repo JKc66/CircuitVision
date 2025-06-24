@@ -6,6 +6,7 @@ import multiprocessing
 import time
 import re
 from PIL import Image
+import base64
 
 from src.utils import (
             create_annotated_image,
@@ -71,6 +72,16 @@ st.set_page_config(
 
 # Load custom CSS
 load_css("static/css/main.css")
+
+def get_image_as_base64(path):
+    """Reads an image file and returns it as a base64 encoded string."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except FileNotFoundError:
+        logger.error(f"Image file not found at path: {path}")
+        return None
 
 # Set up base paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -246,40 +257,58 @@ if analyzer is not None and st.session_state.get('circuit_analyzer_loaded_flag',
         else:
             model_status_text = "Models Ready (No SAM2)"
 
-    # Display both badges - model status on left, CPU on right
-    st.markdown(f"""
-    <div class="system-badges-container">
-        <div class="model-status-badge {model_status_class}">
-            <div class="status-indicator {model_status_class}"></div>
-            {model_status_text}
+    # Display badges and logo in columns
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col1:
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-start;">
+            <div class="model-status-badge {model_status_class}">
+                <div class="status-indicator {model_status_class}"></div>
+                {model_status_text}
+            </div>
         </div>
-        <div class="cpu-info-badge">
-            <div class="blinking-light"></div>
-            Running on CPU ({cpu_count} cores)
+        """, unsafe_allow_html=True)
+    with col2:
+        logo_path = os.path.join(BASE_DIR, "static/images/CircuitVision-nobg_dark.png")
+        logo_base64 = get_image_as_base64(logo_path)
+        if logo_base64:
+            st.markdown(f"""
+                <div class="logo-container">
+                    <img src="data:image/png;base64,{logo_base64}" class="main-logo">
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Fallback to the original method if base64 conversion fails
+            st.image(logo_path, use_container_width=True)
+    with col3:
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-end;">
+            <div class="cpu-info-badge">
+                <div class="blinking-light"></div>
+                Running on CPU ({cpu_count} cores)
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 else:
     # If analyzer is not loaded yet, just show CPU badge on the right
-    st.markdown(f"""
-    <div class="system-badges-container">
-        <div></div> <!-- Empty spacer -->
+    _, col2 = st.columns([3, 1])
+    with col2:
+        st.markdown(f"""
         <div class="cpu-info-badge">
             <div class="blinking-light"></div>
             Running on CPU ({cpu_count} cores)
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
 
 # Main content  
-st.image("static/images/sdp_banner_black.png", use_container_width=True)
+st.image(os.path.join(BASE_DIR, "static/images/sdp_banner_black.png"), use_container_width=True)
 
 # File upload section
 file_upload_container = st.container()
 with file_upload_container:
     uploaded_file = st.file_uploader(
-        "Upload a circuit diagram to get started",
+        "Read the help tooltip (?)",
         type=['png', 'jpg', 'jpeg'],
         help="""
         - Supports AC/DC linear circuits.

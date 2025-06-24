@@ -797,6 +797,7 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
 @media (max-width: 768px) {
     .custom-footer {
         padding: 2rem 1rem;
+        margin-bottom: 4rem; /* Increased space below footer on mobile */
     }
     
     .custom-footer-h3 {
@@ -812,6 +813,47 @@ div[data-testid="stFileUploaderDeleteBtn"] button[data-testid="stBaseButton-mini
         width: 100%;
         justify-content: center;
         max-width: 320px;
+    }
+    
+    .logo-container .main-logo {
+        max-width: 120px; /* Adjust logo size on mobile */
+    }
+
+    /* Make the main tab component the positioning context for the fade effect */
+    div[data-testid="stTabs"] {
+        position: relative;
+    }
+
+    /* The direct child container that holds the tabs needs to scroll */
+    div[data-testid="stTabs"] > div[role="tablist"] {
+        overflow-x: auto;
+        -ms-overflow-style: none;  /* Hide scrollbar on IE and Edge */
+        scrollbar-width: none;  /* Hide scrollbar on Firefox */
+    }
+
+    /* Hide scrollbar for Webkit browsers (Chrome, Safari) */
+    div[data-testid="stTabs"] > div[role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Create the fade effect on the main non-scrolling parent */
+    div[data-testid="stTabs"]::after {
+        content: none;
+    }
+
+    /* Prevent individual tabs from shrinking, forcing them to overflow */
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        flex-shrink: 0;
+    }
+    
+    .loader-popup-content {
+        width: 85vw;
+        min-width: 0;
+        padding: 30px 20px;
+    }
+    
+    .loader-popup-text {
+        font-size: 1em !important; /* Override inline style */
     }
 }
 
@@ -858,34 +900,7 @@ div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
 }
 
 /* === Responsive Tab Styles for Mobile === */
-@media (max-width: 768px) {
-    /* Make the main tab component the positioning context for the fade effect */
-    div[data-testid="stTabs"] {
-        position: relative;
-    }
-
-    /* The direct child container that holds the tabs needs to scroll */
-    div[data-testid="stTabs"] > div[role="tablist"] {
-        overflow-x: auto;
-        -ms-overflow-style: none;  /* Hide scrollbar on IE and Edge */
-        scrollbar-width: none;  /* Hide scrollbar on Firefox */
-    }
-
-    /* Hide scrollbar for Webkit browsers (Chrome, Safari) */
-    div[data-testid="stTabs"] > div[role="tablist"]::-webkit-scrollbar {
-        display: none;
-    }
-
-    /* Create the fade effect on the main non-scrolling parent */
-    div[data-testid="stTabs"]::after {
-        content: none;
-    }
-
-    /* Prevent individual tabs from shrinking, forcing them to overflow */
-    div[data-testid="stTabs"] button[data-baseweb="tab"] {
-        flex-shrink: 0;
-    }
-}
+/* Consolidated into main mobile media query at end of file */
 
 /* New Custom Loader for Analysis Popup */
 .analysis-loader {
@@ -942,18 +957,86 @@ div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
   100% {transform: translate(0, 0);}
 }
 
-@media (max-width: 768px) {
-    .loader-popup-content {
-        width: 85vw;
-        min-width: 0;
-        padding: 30px 20px;
-    }
-    
-    .loader-popup-text {
-        font-size: 1em !important; /* Override inline style */
-    }
+/* Custom styles for the help icon tooltip - V2 */
+@keyframes pulse-help {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 127, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(0, 255, 127, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 127, 0);
+  }
+}
 
-    .custom-footer {
-        padding: 2rem 1rem;
-    }
+div[data-testid="stTooltipIcon"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 24px;  /* Set a fixed size */
+    height: 24px;
+    border-radius: 50%; /* Make it circular */
+    border: 1px solid var(--primary-color);
+    animation: pulse-help 2s infinite;
+    transition: background-color 0.2s ease;
+    background-color: transparent;
+    position: relative; /* Needed for the pseudo-element */
+}
+
+div[data-testid="stTooltipIcon"]:hover {
+    background-color: rgba(0, 255, 127, 0.15); /* Subtle green glow on hover */
+    animation: none; /* Pause animation on hover */
+}
+
+/* Hide the default Streamlit SVG icon by making it invisible but still interactive */
+div[data-testid="stTooltipIcon"] svg {
+    opacity: 0;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+}
+
+/* Create a custom icon using a pseudo-element */
+div[data-testid="stTooltipIcon"]::before {
+    content: '?';
+    font-family: 'Inter', sans-serif; /* Use a clean, modern font */
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--primary-color);
+    line-height: 24px; /* Center it vertically */
+    text-align: center;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    pointer-events: none; /* Allow hover events to pass through to the underlying div */
+}
+
+/* Custom Tooltip Content Styling */
+div[data-testid="stTooltipContent"] {
+    background-color: #2e2e2e !important;
+    color: var(--text-color) !important;
+    border-radius: 0 !important;
+    border: 1px solid var(--primary-color) !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.9em !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+    padding: 10px 14px !important;
+}
+
+/* Logo Styling */
+.logo-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%; /* Ensure container takes height for alignment */
+}
+
+.main-logo {
+    max-width: 100%;
+    height: auto;
 }
