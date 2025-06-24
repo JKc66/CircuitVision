@@ -1,7 +1,7 @@
 # CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align="center">
-  <img width="60%" src="static/images/CircuitVision.png" />
+  <img width="60%" src="static/images/CircuitVision-nobg_dark.png" />
 </p>
 
 <p align="center">
