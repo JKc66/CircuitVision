@@ -44,6 +44,8 @@
     - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
   - [🚀 Usage](#-usage)
   - [🧠 Training Code](#-training-code)
+  - [🙏 Acknowledgements](#-acknowledgements)
+  - [✒️ Citation](#️-citation)
 
 ## 🚀 Overview
 
@@ -157,8 +159,6 @@ Explore the core training pipelines used to build the intelligence behind Circui
   [![Open in Kaggle](https://img.shields.io/badge/Open%20in%20Kaggle-20BEFF?logo=kaggle&logoColor=fff)](https://www.kaggle.com/code/mah01sam/training-sam-2/notebook?scriptVersionId=237405492)
 
 
-  </a>
-
 * **🟧 YOLOv11 Training**
   End-to-end training and inference pipeline for detecting circuit elements with **YOLOv11**.
 
@@ -167,4 +167,23 @@ Explore the core training pipelines used to build the intelligence behind Circui
 
 ---
 
-We are passionate about making complex **electrical circuit analysis** accessible and efficient. We hope CircuitVision empowers your projects!
+## 🙏 Acknowledgements
+
+We extend our deepest gratitude to our supervisor, Prof. Adel Abdennour, for his exceptional guidance, support, and invaluable insights throughout this Senior Design Project.
+
+---
+
+## ✒️ Citation
+
+If you find CircuitVision useful in your research or work, please cite it as follows:
+
+```bibtex
+@misc{CircuitVision,
+  author = {Sameh, Mahmoud and Khan, Jawad},
+  title = {CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation},
+  year = {2025},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/JKc66/CircuitVision}}
+}
+```
