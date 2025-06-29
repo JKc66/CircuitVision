@@ -34,24 +34,22 @@
 </p>
 
 <div align="center">
-<table align="center">
-<tr>
-<td align="center" valign="top">
-    <a href="https://github.com/mah-sam" title="Mahmoud Sameh's GitHub profile">
-        <img src="https://avatars.githubusercontent.com/u/82774404?v=4" width="100" alt="Mahmoud Sameh" style="border-radius: 50%;"/>
-        <br />
-        <sub><b>Mahmoud Sameh</b></sub>
-    </a>
-</td>
-<td align="center" valign="top">
-    <a href="https://github.com/JKc66" title="Jawad Khan's GitHub profile">
-        <img src="https://avatars.githubusercontent.com/u/137785809?v=4" width="100" alt="Jawad Khan" style="border-radius: 50%;"/>
-        <br />
-        <sub><b>Jawad Khan</b></sub>
-    </a>
-</td>
-</tr>
-</table>
+<div style="display: flex; justify-content: center; gap: 20px;">
+    <p style="text-align: center;">
+        <a href="https://github.com/mah-sam" title="Mahmoud Sameh's GitHub profile">
+            <img src="https://avatars.githubusercontent.com/u/82774404?v=4" width="100" alt="Mahmoud Sameh" style="border-radius: 50%;"/>
+            <br />
+            <sub><b>Mahmoud Sameh</b></sub>
+        </a>
+    </p>
+    <p style="text-align: center;">
+        <a href="https://github.com/JKc66" title="Jawad Khan's GitHub profile">
+            <img src="https://avatars.githubusercontent.com/u/137785809?v=4" width="100" alt="Jawad Khan" style="border-radius: 50%;"/>
+            <br />
+            <sub><b>Jawad Khan</b></sub>
+        </a>
+    </p>
+</div>
 </div>
 
 ## 📚 Table of Contents
