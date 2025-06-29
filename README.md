@@ -14,10 +14,10 @@
 
 <p align="center">
     <a href="https://CircuitVision.jawadk.me" target="_blank">
-        <img src="https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Live Demo" />
+        <img src="https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?style=plastic&logo=streamlit&logoColor=white" alt="Live Demo" />
     </a>
     <a href="https://github.com/JKc66/CircuitVision" target="_blank">
-        <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github&logoColor=white" alt="View on GitHub" />
+        <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=plastic&logo=github&logoColor=white" alt="View on GitHub" />
     </a>
 </p>
 
