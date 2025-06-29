@@ -1,7 +1,11 @@
 # CircuitVision 🌿
 
 <p align="center">
-  <img width="60%" src="static/images/CircuitVision-nobg_dark.png" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="static/images/CircuitVision-nobg_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="static/images/CircuitVision-nobg_light.png">
+    <img width="60%" src="static/images/CircuitVision-nobg_dark.png" alt="CircuitVision Logo" />
+  </picture>
 </p>
 
 <p align="center">
@@ -29,6 +33,7 @@
   </a>
 </p>
 
+<div align="center">
 <table align="center">
 <tr>
 <td align="center" valign="top">
@@ -47,6 +52,7 @@
 </td>
 </tr>
 </table>
+</div>
 
 ## 📚 Table of Contents
 - [CircuitVision 🌿](#circuitvision-)
@@ -77,13 +83,17 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 
 <p align="center">
   <b>Phase 1: Component Detection</b><br>
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase1.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase1.png#gh-dark-mode-only" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase1.png#gh-light-mode-only" />
   <b>Phase 2: Topology Analysis</b><br>
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase2.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase2.png#gh-dark-mode-only" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase2.png#gh-light-mode-only" />
   <b>Phase 3: Netlist Generation</b><br>
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase3.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase3.png#gh-dark-mode-only" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase3.png#gh-light-mode-only" />
   <b>Phase 4: Simulation</b><br>
-  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase4.png" />
+  <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase4.png#gh-dark-mode-only" />
+  <img width="100%" src="static/Figures/Lightmode_CircuitVision2x_phase4.png#gh-light-mode-only" />
 </p>
 <p align="center"><i>The four phases of the CircuitVision pipeline: Detection, Topology Analysis, Netlist Generation, and Simulation.</i></p>
 
