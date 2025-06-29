@@ -1,17 +1,27 @@
-# CircuitVision: AI-Powered Electrical Circuit Analysis & Netlist Generation
+# CircuitVision ⚡🌿: AI-Powered Electrical Circuit Analysis & Netlist Generation
 
 <p align="center">
   <img width="60%" src="static/images/CircuitVision-nobg_dark.png" />
 </p>
 
 <p align="center">
-  <a href="https://app.jawadk.me/CircuitVision/" target="_blank">
-    <img alt="Streamlit App" src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white" />
-  </a>
+  <em>From picture to simulation. An AI-powered app that automatically analyzes circuit diagrams and generates SPICE netlists.</em>
+</p>
+
+<p align="center">
+    <a href="https://app.jawadk.me/CircuitVision/" target="_blank">
+        <img src="https://img.shields.io/badge/Live_Demo-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white" alt="Live Demo">
+    </a>
+    <a href="https://github.com/JKc66/CircuitVision" target="_blank">
+        <img src="https://img.shields.io/badge/View_on_GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="View on GitHub">
+    </a>
+</p>
+
+<p align="center">
   <a href="https://github.com/JKc66/CircuitVision/blob/main/LICENSE" target="_blank">
     <img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-green.svg" />
   </a>
-    <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
+  <a href="https://github.com/JKc66/CircuitVision/issues" target="_blank">
     <img alt="Issues" src="https://img.shields.io/github/issues/JKc66/CircuitVision" />
   </a>
   <a href="https://deepwiki.com/JKc66/CircuitVision" target="_blank">
@@ -30,7 +40,7 @@
 </p>
 
 ## 📚 Table of Contents
-- [CircuitVision: AI-Powered Electrical Circuit Analysis \& Netlist Generation](#circuitvision-ai-powered-electrical-circuit-analysis--netlist-generation)
+- [CircuitVision ⚡🌿: AI-Powered Electrical Circuit Analysis \& Netlist Generation](#circuitvision--ai-powered-electrical-circuit-analysis--netlist-generation)
   - [📚 Table of Contents](#-table-of-contents)
   - [🚀 Overview](#-overview)
   - [✨ Key Features \& The Engineering Behind Them](#-key-features--the-engineering-behind-them)
@@ -40,6 +50,7 @@
     - [📝 Automated \& Enriched Netlist Generation](#-automated--enriched-netlist-generation)
     - [🖥️ Intuitive User Interface \& Rich Visualization](#️-intuitive-user-interface--rich-visualization)
   - [📈 Our Development Journey \& Enhancements](#-our-development-journey--enhancements)
+  - [🛠️ Technology Stack](#️-technology-stack)
   - [🛠️ Setup](#️-setup)
     - [🐳 Using Docker (Recommended)](#-using-docker-recommended)
   - [🚀 Usage](#-usage)
@@ -56,9 +67,13 @@ Our goal is to automate the tedious process of manual circuit transcription, ena
 ## ✨ Key Features & The Engineering Behind Them
 
 <p align="center">
+  <b>Phase 1: Component Detection</b><br>
   <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase1.png" />
+  <b>Phase 2: Topology Analysis</b><br>
   <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase2.png" />
+  <b>Phase 3: Netlist Generation</b><br>
   <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase3.png" />
+  <b>Phase 4: Simulation</b><br>
   <img width="100%" src="static/Figures/Darkmode_CircuitVision2x_phase4.png" />
 </p>
 <p align="center"><i>The four phases of the CircuitVision pipeline: Detection, Topology Analysis, Netlist Generation, and Simulation.</i></p>
@@ -98,6 +113,15 @@ CircuitVision is the culmination of significant research and development in appl
 *   **SAM 2 Adaptation:** We've **custom-adapted the application of SAM 2** for optimal circuit segmentation, leading to the intelligent cropping feature which is key to downstream accuracy.
 *   **Algorithm Development:** The node analysis and corner detection algorithms are **custom-built** for the unique challenges of **electrical circuit diagrams**.
 *   **Multi-Model Orchestration:** Integrating YOLO, SAM 2, and Gemini into a cohesive and efficient pipeline represents a complex engineering achievement.
+
+## 🛠️ Technology Stack
+<p align="center">
+  <a href="https://www.python.org/" target="_blank"><img alt="Python" src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
+  <a href="https://pytorch.org/" target="_blank"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" /></a>
+  <a href="https://streamlit.io/" target="_blank"><img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" /></a>
+  <a href="https://www.docker.com/" target="_blank"><img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" /></a>
+  <a href="https://deepmind.google/technologies/gemini/" target="_blank"><img alt="Gemini" src="https://img.shields.io/badge/Gemini-8E77F0?style=for-the-badge&logo=google&logoColor=white" /></a>
+</p>
 
 ## 🛠️ Setup
 
