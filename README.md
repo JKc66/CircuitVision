@@ -29,7 +29,6 @@
   </a>
 </p>
 
----
 <table align="center">
 <tr>
 <td align="center" valign="top">
